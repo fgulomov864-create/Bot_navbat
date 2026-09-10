@@ -13,7 +13,7 @@ from aiogram.types import (
     ReplyKeyboardMarkup,
     InlineKeyboardMarkup,
     InlineKeyboardButton,
-    CallbackQuery,
+    CallbackQuery, BotCommand,
 )
 
 # .env faylidagi o'zgaruvchilarni yuklash
@@ -425,27 +425,14 @@ async def send_time_notification(callback: CallbackQuery):
 
 # --- ISHGA TUSHIRISH ---
 async def main():
-    init_db()
-    logging.basicConfig(level=logging.INFO)
-    await dp.start_polling(bot)
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
-
-
-# --- ISHGA TUSHIRISH ---
-async def main():
-    init_db()
-    logging.basicConfig(level=logging.INFO)
-
-    # Telegram menyusiga /start komandasini qo'shish
+    init_db()  
     await bot.set_my_commands([
         types.BotCommand(command="start", description="🤖 Botni qayta ishga tushirish")
     ])
-
+    logging.basicConfig(level=logging.INFO)
     await dp.start_polling(bot)
 
 
 if __name__ == "__main__":
     asyncio.run(main())
+

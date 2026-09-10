@@ -432,3 +432,20 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
+
+# --- ISHGA TUSHIRISH ---
+async def main():
+    init_db()
+    logging.basicConfig(level=logging.INFO)
+
+    # Telegram menyusiga /start komandasini qo'shish
+    await bot.set_my_commands([
+        types.BotCommand(command="start", description="🤖 Botni qayta ishga tushirish")
+    ])
+
+    await dp.start_polling(bot)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

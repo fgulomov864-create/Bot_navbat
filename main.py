@@ -20,10 +20,21 @@ from aiogram.types import (
 load_dotenv()
 
 TOKEN = os.getenv("BOT_TOKEN")
-ADMIN_ID = int(os.getenv("ADMIN_ID", 0))
+ADMIN_ID = int(os.getenv("ADMIN_ID", 637554472))
 
 MAP_LINK = "https://maps.app.goo.gl/Ay8YVsm44MMAWxst9?g_st=ac"
-AVAILABLE_TIMES = ["09:00", "10:30", "12:00", "13:30", "15:00", "16:30", "18:00"]
+DB_NAME = "dental_bot (2).db" if os.path.exists("dental_bot (2).db") and not os.path.exists("dental_bot.db") else "dental_bot.db"
+
+DEPARTMENTS = {
+    "treatment": {
+        "name": "🦷 Davolash bo'limi",
+        "times": ["09:00", "10:30", "12:00", "13:30", "15:00", "16:30", "18:00"]
+    },
+    "consultation": {
+        "name": "👨‍⚕️ Maslahat olish",
+        "times": ["09:30", "11:00", "12:30", "14:00", "15:30", "17:00", "18:30"]
+    }
+}
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
@@ -31,48 +42,37 @@ dp = Dispatcher()
 
 # --- DATABASE TIZIMI ---
 def init_db():
-    conn = sqlite3.connect("dental_bot.db")
+    conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
 
     cursor.execute("""
-                   CREATE TABLE IF NOT EXISTS users
-                   (
-                       user_id
-                       INTEGER
-                       PRIMARY
-                       KEY,
-                       full_name
-                       TEXT,
-                       phone
-                       TEXT
-                   )
-                   """)
+        CREATE TABLE IF NOT EXISTS users
+        (
+            user_id INTEGER PRIMARY KEY,
+            full_name TEXT,
+            phone TEXT
+        )
+    """)
 
     cursor.execute("""
-                   CREATE TABLE IF NOT EXISTS queue_appointments
-                   (
-                       id
-                       INTEGER
-                       PRIMARY
-                       KEY
-                       AUTOINCREMENT,
-                       user_id
-                       INTEGER,
-                       booking_date
-                       TEXT,
-                       booking_time
-                       TEXT,
-                       status
-                       TEXT
-                       DEFAULT
-                       'active',
-                       UNIQUE
-                   (
-                       booking_date,
-                       booking_time
-                   )
-                       )
-                   """)
+        CREATE TABLE IF NOT EXISTS queue_appointments
+        (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            service_type TEXT DEFAULT 'Davolash bo''limi',
+            booking_date TEXT,
+            booking_time TEXT,
+            status TEXT DEFAULT 'active',
+            UNIQUE (booking_date, booking_time)
+        )
+    """)
+
+    # Agar jadval avval service_type ustunisiz yaratilgan bo'lsa, ustunni qo'shish (migratsiya)
+    cursor.execute("PRAGMA table_info(queue_appointments)")
+    columns = [col[1] for col in cursor.fetchall()]
+    if "service_type" not in columns:
+        cursor.execute("ALTER TABLE queue_appointments ADD COLUMN service_type TEXT DEFAULT 'Davolash bo''limi'")
+
     conn.commit()
     conn.close()
 
@@ -98,7 +98,14 @@ def get_phone_keyboard():
     )
 
 
-def get_days_keyboard():
+def get_departments_keyboard():
+    keyboard = []
+    for dept_key, dept_info in DEPARTMENTS.items():
+        keyboard.append([InlineKeyboardButton(text=dept_info["name"], callback_data=f"dept_{dept_key}")])
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+def get_days_keyboard(dept_key="treatment"):
     keyboard = []
     today = datetime.now()
 
@@ -111,13 +118,15 @@ def get_days_keyboard():
             weekday_name = weekdays_uz[day.weekday()]
 
             button_text = f"📅 {weekday_name} ({day.strftime('%d.%m')})"
-            keyboard.append([InlineKeyboardButton(text=button_text, callback_data=f"qdate_{day_str}")])
+            keyboard.append([InlineKeyboardButton(text=button_text, callback_data=f"qdate_{dept_key}_{day_str}")])
 
+    keyboard.append([InlineKeyboardButton(text="⬅️ Ortga (Bo'limni tanlash)", callback_data="back_to_depts")])
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
-def get_time_keyboard(selected_date):
-    conn = sqlite3.connect("dental_bot.db")
+def get_time_keyboard(dept_key, selected_date):
+    times = DEPARTMENTS.get(dept_key, {}).get("times", [])
+    conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute("SELECT booking_time FROM queue_appointments WHERE booking_date = ? AND status = 'active'",
                    (selected_date,))
@@ -126,11 +135,11 @@ def get_time_keyboard(selected_date):
 
     keyboard = []
     row = []
-    for time_slot in AVAILABLE_TIMES:
+    for time_slot in times:
         if time_slot in booked_times:
             row.append(InlineKeyboardButton(text=f"❌ {time_slot}", callback_data="booked_slot"))
         else:
-            row.append(InlineKeyboardButton(text=f"🟢 {time_slot}", callback_data=f"take_{selected_date}_{time_slot}"))
+            row.append(InlineKeyboardButton(text=f"🟢 {time_slot}", callback_data=f"take_{dept_key}_{selected_date}_{time_slot}"))
 
         if len(row) == 2:
             keyboard.append(row)
@@ -138,13 +147,14 @@ def get_time_keyboard(selected_date):
     if row:
         keyboard.append(row)
 
+    keyboard.append([InlineKeyboardButton(text="⬅️ Ortga (Kunni tanlash)", callback_data=f"dept_{dept_key}")])
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
 # --- HANDLERLAR ---
 @dp.message(CommandStart())
 async def cmd_start(message: Message):
-    conn = sqlite3.connect("dental_bot.db")
+    conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute("SELECT phone FROM users WHERE user_id = ?", (message.from_user.id,))
     user = cursor.fetchone()
@@ -169,7 +179,7 @@ async def process_contact(message: Message):
     full_name = message.from_user.full_name
     phone = message.contact.phone_number
 
-    conn = sqlite3.connect("dental_bot.db")
+    conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute(
         "INSERT OR REPLACE INTO users (user_id, full_name, phone) VALUES (?, ?, ?)",
@@ -197,28 +207,79 @@ async def send_location(message: Message):
 
 @dp.message(F.text == "📅 Navbat olish")
 async def start_queue(message: Message):
-    await message.answer("Qaysi kunga navbat olmoqchisiz? Tanlang:", reply_markup=get_days_keyboard())
+    await message.answer(
+        "🏥 **Iltimos, kerakli bo'limni tanlang:**",
+        reply_markup=get_departments_keyboard(),
+        parse_mode="Markdown"
+    )
+
+
+@dp.callback_query(F.data == "back_to_depts")
+async def back_to_departments(callback: CallbackQuery):
+    await callback.message.edit_text(
+        "🏥 **Iltimos, kerakli bo'limni tanlang:**",
+        reply_markup=get_departments_keyboard(),
+        parse_mode="Markdown"
+    )
+    await callback.answer()
+
+
+@dp.callback_query(F.data.startswith("dept_"))
+async def process_dept(callback: CallbackQuery):
+    dept_key = callback.data.split("dept_")[1]
+    dept_info = DEPARTMENTS.get(dept_key)
+    if not dept_info:
+        await callback.answer("Bo'lim topilmadi!", show_alert=True)
+        return
+
+    await callback.message.edit_text(
+        f"🏥 **Tanlangan bo'lim:** {dept_info['name']}\n\n"
+        f"Qaysi kunga navbat olmoqchisiz? Tanlang:",
+        reply_markup=get_days_keyboard(dept_key),
+        parse_mode="Markdown"
+    )
+    await callback.answer()
 
 
 @dp.callback_query(F.data.startswith("qdate_"))
 async def process_date(callback: CallbackQuery):
-    selected_date = callback.data.split("qdate_")[1]
+    parts = callback.data.split("_")
+    if len(parts) >= 3:
+        dept_key = parts[1]
+        selected_date = parts[2]
+    else:
+        dept_key = "treatment"
+        selected_date = parts[1]
+
+    dept_info = DEPARTMENTS.get(dept_key, DEPARTMENTS["treatment"])
 
     await callback.message.edit_text(
+        f"🏥 **Bo'lim:** {dept_info['name']}\n"
         f"📅 **Tanlangan kun:** {selected_date}\n\n"
         f"Iltimos, o'zingizga qulay soatni tanlang:",
         parse_mode="Markdown",
-        reply_markup=get_time_keyboard(selected_date)
+        reply_markup=get_time_keyboard(dept_key, selected_date)
     )
     await callback.answer()
 
 
 @dp.callback_query(F.data.startswith("take_"))
 async def take_queue(callback: CallbackQuery):
-    _, selected_date, selected_time = callback.data.split("_")
+    parts = callback.data.split("_")
+    if len(parts) >= 4:
+        dept_key = parts[1]
+        selected_date = parts[2]
+        selected_time = parts[3]
+    else:
+        dept_key = "treatment"
+        selected_date = parts[1]
+        selected_time = parts[2]
+
+    dept_info = DEPARTMENTS.get(dept_key, DEPARTMENTS["treatment"])
+    service_name = dept_info["name"]
     user_id = callback.from_user.id
 
-    conn = sqlite3.connect("dental_bot.db")
+    conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
 
     cursor.execute(
@@ -237,15 +298,16 @@ async def take_queue(callback: CallbackQuery):
 
     try:
         cursor.execute(
-            "INSERT INTO queue_appointments (user_id, booking_date, booking_time) VALUES (?, ?, ?)",
-            (user_id, selected_date, selected_time)
+            "INSERT INTO queue_appointments (user_id, service_type, booking_date, booking_time) VALUES (?, ?, ?, ?)",
+            (user_id, service_name, selected_date, selected_time)
         )
         conn.commit()
 
         await callback.message.edit_text(
             f"🎉 **Navbat muvaffaqiyatli olindi!**\n\n"
-            f"📅 Kun: **{selected_date}**\n"
-            f"⏰ Soat: **{selected_time}**\n\n"
+            f"🏥 **Bo'lim:** {service_name}\n"
+            f"📅 **Kun:** {selected_date}\n"
+            f"⏰ **Soat:** {selected_time}\n\n"
             f"🔔 Qabul vaqtingiz kelganda shifokor bot orqali sizga ogohlantirish yuboradi!",
             parse_mode="Markdown"
         )
@@ -254,6 +316,7 @@ async def take_queue(callback: CallbackQuery):
             name, phone = user_info
             admin_msg = (
                 f"🚨 **Yangi navbat!**\n\n"
+                f"🏥 **Bo'lim:** {service_name}\n"
                 f"👤 **Bemor:** {name}\n"
                 f"📞 **Tel:** {phone}\n"
                 f"📅 **Kun:** {selected_date}\n"
@@ -263,7 +326,7 @@ async def take_queue(callback: CallbackQuery):
 
     except sqlite3.IntegrityError:
         await callback.answer("Afsuski, bu soatdagi navbat band bo'lib qoldi!", show_alert=True)
-        await callback.message.edit_reply_markup(reply_markup=get_time_keyboard(selected_date))
+        await callback.message.edit_reply_markup(reply_markup=get_time_keyboard(dept_key, selected_date))
     finally:
         conn.close()
 
@@ -278,10 +341,10 @@ async def show_my_queue(message: Message):
     user_id = message.from_user.id
     today = datetime.now().strftime("%Y-%m-%d")
 
-    conn = sqlite3.connect("dental_bot.db")
+    conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute(
-        "SELECT booking_date, booking_time FROM queue_appointments WHERE user_id = ? AND status = 'active' AND booking_date >= ?",
+        "SELECT booking_date, booking_time, service_type FROM queue_appointments WHERE user_id = ? AND status = 'active' AND booking_date >= ? ORDER BY booking_date ASC, booking_time ASC",
         (user_id, today)
     )
     records = cursor.fetchall()
@@ -291,8 +354,9 @@ async def show_my_queue(message: Message):
         await message.answer("Sizda hozircha faol navbatlar yo'q.")
     else:
         text = "📋 **Sizning faol navbatlaringiz:**\n\n"
-        for date, time_slot in records:
-            text += f"📅 Kun: **{date}** | ⏰ Soat: **{time_slot}**\n"
+        for date, time_slot, s_type in records:
+            s_name = s_type if s_type else "Davolash bo'limi"
+            text += f"📅 Kun: **{date}** | ⏰ Soat: **{time_slot}** | 🏥 **{s_name}**\n"
         await message.answer(text, parse_mode="Markdown")
 
 
@@ -301,10 +365,10 @@ async def cancel_queue_prompt(message: Message):
     user_id = message.from_user.id
     today = datetime.now().strftime("%Y-%m-%d")
 
-    conn = sqlite3.connect("dental_bot.db")
+    conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute(
-        "SELECT id, booking_date, booking_time FROM queue_appointments WHERE user_id = ? AND status = 'active' AND booking_date >= ?",
+        "SELECT id, booking_date, booking_time, service_type FROM queue_appointments WHERE user_id = ? AND status = 'active' AND booking_date >= ? ORDER BY booking_date ASC, booking_time ASC",
         (user_id, today)
     )
     records = cursor.fetchall()
@@ -315,8 +379,9 @@ async def cancel_queue_prompt(message: Message):
         return
 
     keyboard = []
-    for app_id, date, time_slot in records:
-        keyboard.append([InlineKeyboardButton(text=f"❌ {date} soat {time_slot} navbatini bekor qilish",
+    for app_id, date, time_slot, s_type in records:
+        s_name = s_type if s_type else "Davolash bo'limi"
+        keyboard.append([InlineKeyboardButton(text=f"❌ {date} {time_slot} ({s_name}) bekor qilish",
                                               callback_data=f"del_{app_id}")])
 
     await message.answer("Qaysi navbatni bekor qilmoqchisiz?",
@@ -327,11 +392,11 @@ async def cancel_queue_prompt(message: Message):
 async def process_cancel(callback: CallbackQuery):
     app_id = int(callback.data.split("del_")[1])
 
-    conn = sqlite3.connect("dental_bot.db")
+    conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
 
     cursor.execute(
-        """SELECT qa.booking_date, qa.booking_time, u.full_name, u.phone, qa.user_id
+        """SELECT qa.booking_date, qa.booking_time, u.full_name, u.phone, qa.user_id, qa.service_type
            FROM queue_appointments qa
                     JOIN users u ON u.user_id = qa.user_id
            WHERE qa.id = ?""",
@@ -346,11 +411,13 @@ async def process_cancel(callback: CallbackQuery):
     await callback.message.edit_text("✅ Navbatingiz muvaffaqiyatli bekor qilindi.")
 
     if info:
-        date, time_slot, name, phone, u_id = info
+        date, time_slot, name, phone, u_id, s_type = info
+        s_name = s_type if s_type else "Davolash bo'limi"
 
         if ADMIN_ID:
             admin_msg = (
                 f"⚠️ **Navbat bekor qilindi!**\n\n"
+                f"🏥 **Bo'lim:** {s_name}\n"
                 f"👤 **Bemor:** {name}\n"
                 f"📞 **Tel:** {phone}\n"
                 f"📅 **Kun:** {date}\n"
@@ -367,11 +434,11 @@ async def admin_panel(message: Message):
 
     today = datetime.now().strftime("%Y-%m-%d")
 
-    conn = sqlite3.connect("dental_bot.db")
+    conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
 
     cursor.execute("""
-                   SELECT qa.user_id, qa.booking_date, qa.booking_time, u.full_name, u.phone
+                   SELECT qa.user_id, qa.booking_date, qa.booking_time, u.full_name, u.phone, qa.service_type
                    FROM queue_appointments qa
                             JOIN users u ON u.user_id = qa.user_id
                    WHERE qa.booking_date >= ?
@@ -388,8 +455,10 @@ async def admin_panel(message: Message):
 
     await message.answer("📋 **Olingan navbatlar ro'yxati (Chaqirish uchun tugmani bosing):**")
 
-    for u_id, b_date, b_time, name, phone in rows:
+    for u_id, b_date, b_time, name, phone, s_type in rows:
+        s_name = s_type if s_type else "Davolash bo'limi"
         msg_text = (
+            f"🏥 **Bo'lim:** {s_name}\n"
             f"📅 **Kun:** {b_date}\n"
             f"⏰ **Soat:** {b_time}\n"
             f"👤 **Bemor:** {name}\n"

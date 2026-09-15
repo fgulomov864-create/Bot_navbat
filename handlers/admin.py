@@ -17,6 +17,7 @@ from aiogram.types import CallbackQuery, Message
 
 import storage as db
 import keyboards as kb
+from backup import backup
 from callbacks import AdminCB, AdminQueueCB, AdminUserCB
 from config import (
     ADMIN_PAGE_SIZE,
@@ -83,16 +84,20 @@ async def _delete_quietly(message: Message) -> None:
 
 async def _panel_text(user_id: int) -> str:
     admin = await db.get_admin(user_id)
-    role = "👑 Super admin" if admin and admin["is_super"] else "👤 Admin"
+    is_super = bool(admin and admin["is_super"])
     counts = await db.stats()
-    return (
+
+    text = (
         f"👨‍⚕️ <b>Admin panel</b>\n\n"
-        f"Sizning darajangiz: <b>{role}</b>\n"
+        f"Sizning darajangiz: <b>{'👑 Super admin' if is_super else '👤 Admin'}</b>\n"
         f"📋 Kutilayotgan navbatlar: <b>{counts['upcoming']}</b>\n"
         f"📅 Bugunga: <b>{counts['today']}</b>\n"
-        f"👥 Adminlar: <b>{counts['admins']}</b>\n\n"
-        f"Kerakli bo'limni tanlang:"
     )
+    # Adminlar soni va zaxira holati faqat super adminni qiziqtiradi
+    if is_super:
+        text += f"👥 Adminlar: <b>{counts['admins']}</b>\n{backup.status_line()}\n"
+
+    return text + "\nKerakli bo'limni tanlang:"
 
 
 async def open_panel(message: Message, user_id: int) -> None:
@@ -316,12 +321,47 @@ async def cb_queue_action(callback: CallbackQuery, callback_data: AdminQueueCB, 
 
 
 # --------------------------------------------------------------------------
+# Qo'lda zaxiralash (faqat super admin)
+# --------------------------------------------------------------------------
+
+@router.callback_query(AdminCB.filter(F.action == "backup"))
+async def cb_backup(callback: CallbackQuery) -> None:
+    if not await _guard(callback, need_super=True):
+        return
+
+    if not backup.enabled:
+        reason = f"\n\nSabab: {backup.last_error}" if backup.last_error else ""
+        await callback.answer(
+            "GitHub zaxirasi sozlanmagan.\n\n"
+            "Railway'da BACKUP_REPO va BACKUP_TOKEN o'zgaruvchilarini qo'shing."
+            f"{reason}",
+            show_alert=True,
+        )
+        return
+
+    await callback.answer("Yuborilmoqda…")
+    ok = await backup.upload(force=True)
+    await callback.answer(
+        "💾 Zaxira GitHub'ga yuklandi" if ok
+        else f"⚠️ Yuklanmadi: {backup.last_error or 'nomaʼlum xato'}",
+        show_alert=True,
+    )
+    await edit_safe(
+        callback.message,
+        await _panel_text(callback.from_user.id),
+        reply_markup=kb.admin_menu(is_super=True),
+    )
+
+
+# --------------------------------------------------------------------------
 # Adminlar ro'yxati
 # --------------------------------------------------------------------------
 
 @router.callback_query(AdminCB.filter(F.action == "admins"))
 async def cb_admins(callback: CallbackQuery) -> None:
-    if not await _guard(callback):
+    # Tugma oddiy adminda chizilmaydi, lekin callback'ni qo'lda yuborish mumkin —
+    # shuning uchun serverda ham tekshiramiz
+    if not await _guard(callback, need_super=True):
         return
     await _render_admins(callback)
     await callback.answer()

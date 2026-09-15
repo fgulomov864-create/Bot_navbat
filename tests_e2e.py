@@ -419,11 +419,12 @@ async def test_admin_management() -> None:
     check("ID lar ko'rsatildi", s.said("100") and s.said("200"))
     check("'siz' belgisi qo'yildi", s.said("siz"))
 
-    # Oddiy admin ro'yxatni ko'radi, lekin boshqara olmaydi
+    # Oddiy admin ro'yxatni UMUMAN ko'rmaydi (tugma ham chizilmaydi, callback ham rad etiladi)
     s.reset()
     await dp.feed_update(bot, callback_update(200, AdminCB(action="admins").pack()))
-    check("oddiy admin ham ro'yxatni ko'radi", s.said("Adminlar ro'yxati"))
-    check("unga boshqarish mumkin emasligi aytildi", s.said("faqat super admin"))
+    check("oddiy adminga adminlar ro'yxati BERILMADI", not s.said("Adminlar ro'yxati"), s.last_text()[:60])
+    check("oddiy adminga rad javobi berildi", s.said("faqat super admin"), str(s.alerts()))
+    check("oddiy adminga boshqa adminlar ID si ko'rsatilmadi", not s.said("300"))
 
     # Oddiy admin boshqasini chiqarmoqchi
     s.reset()
@@ -460,6 +461,55 @@ async def test_admin_management() -> None:
     check("oddiy admindan tasdiq so'raldi", s.said("voz kechasizmi"))
     await dp.feed_update(bot, callback_update(200, AdminCB(action="logout_yes").pack()))
     check("oddiy admin chiqdi", not await db.is_admin(200))
+
+    await bot.session.close()
+
+
+async def test_menu_visibility() -> None:
+    print("\n📦 Menyu ko'rinishi (oddiy admin vs super admin)")
+    bot, dp, s = await build()
+    await db.add_admin(100, "Super", None)
+    await db.add_admin(200, "Oddiy", None, added_by=100)
+
+    def menu_labels() -> list[str]:
+        for call in reversed(s.calls):
+            markup = getattr(call, "reply_markup", None)
+            if markup is not None and getattr(markup, "inline_keyboard", None):
+                return [b.text for row in markup.inline_keyboard for b in row]
+        return []
+
+    # Super admin
+    s.reset()
+    await dp.feed_update(bot, text_update(100, "/admin", name="Super Admin"))
+    labels = menu_labels()
+    check("super adminda 'Adminlar ro'yxati' bor", any("Adminlar" in t for t in labels), str(labels))
+    check("super adminda 'Parolni o'zgartirish' bor", any("Parol" in t for t in labels), str(labels))
+    check("super adminda 'zaxiralash' bor", any("zaxira" in t.lower() for t in labels), str(labels))
+    check("super adminga zaxira holati ko'rsatildi", s.said("Zaxira:"), s.last_text()[:120])
+
+    # Oddiy admin — super admin bo'limlari UMUMAN chizilmaydi
+    s.reset()
+    await dp.feed_update(bot, text_update(200, "/admin", name="Oddiy Admin"))
+    labels = menu_labels()
+    check("ODDIY adminda 'Adminlar' YO'Q", not any("Adminlar" in t for t in labels), str(labels))
+    check("ODDIY adminda 'Parol' YO'Q", not any("Parol" in t for t in labels), str(labels))
+    check("ODDIY adminda 'zaxira' YO'Q", not any("zaxira" in t.lower() for t in labels), str(labels))
+    check("oddiy adminda 'Navbatlar' bor", any("Navbatlar" in t for t in labels), str(labels))
+    check("oddiy adminda 'chiqish' bor", any("chiqish" in t.lower() for t in labels), str(labels))
+    check("oddiy adminga zaxira holati ko'rsatilmadi", not s.said("Zaxira:"), s.last_text()[:120])
+    check("oddiy adminga adminlar soni ko'rsatilmadi", not s.said("👥 Adminlar:"))
+
+    # Tugma yo'q bo'lsa ham callback'ni qo'lda yuborish mumkin — server tekshiruvi
+    for action in ("admins", "passwd", "backup"):
+        s.reset()
+        await dp.feed_update(bot, callback_update(200, AdminCB(action=action).pack()))
+        check(f"oddiy admin '{action}' ni qo'lda chaqira olmadi",
+              s.said("faqat super admin"), str(s.alerts()))
+
+    # Butunlay begona odam
+    s.reset()
+    await dp.feed_update(bot, callback_update(999, AdminCB(action="admins").pack()))
+    check("begona odam rad etildi", s.said("ruxsatingiz yo'q"), str(s.alerts()))
 
     await bot.session.close()
 
@@ -606,6 +656,7 @@ async def main() -> None:
     for test in (
         test_registration, test_booking_flow, test_cancel_ownership,
         test_admin_login, test_admin_bruteforce, test_admin_management,
+        test_menu_visibility,
         test_password_change, test_admin_queue, test_notifications,
         test_fallback_and_errors,
     ):

@@ -32,10 +32,14 @@ Panelga **parol** bilan kiriladi. Boshlang'ich parol: `1234567890`.
 |---|---|---|
 | 📋 Navbatlar | hamma admin | Sahifalangan ro'yxat: 🚨 chaqirish · ✅ keldi · 🚫 kelmadi · ❌ bekor qilish |
 | 📊 Statistika | hamma admin | Bemorlar, bugungi/kutilayotgan navbatlar, haftalik hisobot |
-| 👥 Adminlar ro'yxati | hamma admin | Kim admin, kim super admin, ID va qo'shilgan sana |
-| ❌ *Adminni chiqarish* | **faqat super admin** | Ro'yxatdagi oddiy adminni o'chirish (tasdiqlash bilan) |
+| 🚪 Adminlikdan chiqish | **faqat oddiy admin** | O'z admin huquqidan voz kechish |
+| 👥 Adminlar ro'yxati | **faqat super admin** | Kim admin, ID, daraja, sana + ❌ ro'yxatdan chiqarish |
 | 🔑 Parolni o'zgartirish | **faqat super admin** | Yangi parol; barcha adminlarga xabar boradi |
-| 🚪 Adminlikdan chiqish | oddiy admin | O'z admin huquqidan voz kechish |
+| 💾 Hozir zaxiralash | **faqat super admin** | data.json ni darhol GitHub'ga yuklaydi |
+
+> Oddiy adminda super admin tugmalari **umuman chizilmaydi**. Tugma yo'q bo'lsa ham
+> callback'ni qo'lda yuborish mumkin, shuning uchun har bir amal **serverda ham**
+> qayta tekshiriladi.
 
 **Xavfsizlik choralari:**
 - Parol bazada ochiq saqlanmaydi — `PBKDF2-SHA256`, 200 000 iteratsiya, tasodifiy salt.
@@ -66,14 +70,88 @@ python main.py
 | O'zgaruvchi | Majburiy | Izoh |
 |---|---|---|
 | `BOT_TOKEN` | ✅ | @BotFather dan olinadi |
-| `ADMIN_ID` | ❌ | Ko'rsatilsa — avtomatik super admin. Bo'sh bo'lsa, birinchi kirgan odam super admin bo'ladi |
+| `ADMIN_ID` | ❌ | Super adminlar **ro'yxati**. Bo'sh bo'lsa, birinchi kirgan odam super admin bo'ladi |
 | `ADMIN_PASSWORD` | ❌ | Boshlang'ich parol (default: `1234567890`) |
 | `TIMEZONE` | ❌ | Default: `Asia/Tashkent` |
-| `DATA_FILE` | ❌ | Default: `data.json` |
+| `DATA_FILE` | ❌ | Default: `data.json`. Railway'da: `/data/data.json` |
 | `CLINIC_ADDRESS`, `MAP_LINK` | ❌ | Manzil va xarita havolasi |
+| `BACKUP_REPO`, `BACKUP_TOKEN` | ❌ | GitHub zaxirasi — pastga qarang |
+
+`ADMIN_ID` bir nechta odamni qabul qiladi, hamma format ishlaydi:
+
+```bash
+ADMIN_ID=[]                        # hech kim — parol bilan kiriladi
+ADMIN_ID=637554472                 # bitta super admin
+ADMIN_ID=[637554472, 123456789]    # ikkita super admin
+ADMIN_ID=637554472,123456789       # xuddi shunday
+```
 
 > ⚠️ `.env` va `data.json` **hech qachon** git'ga qo'shilmasin — ular tokeningizni va
 > bemorlarning shaxsiy ma'lumotlarini saqlaydi. `.gitignore` da bloklangan.
+
+---
+
+## 🚂 Railway'ga joylash
+
+⚠️ **Eng muhim narsa:** Railway konteynerining diski **vaqtinchalik**. Hech narsa
+qilinmasa, har bir redeploy'da `data.json` — ya'ni **barcha bemorlar va navbatlar** —
+o'chib ketadi. Quyidagi ikki himoyani ishlatish kerak.
+
+### 1-qadam. Loyihani ulash
+
+1. [railway.com](https://railway.com) → **New Project** → **Deploy from GitHub repo**
+2. Shu repozitoriyni tanlang. `Dockerfile` va `railway.json` allaqachon tayyor.
+
+### 2-qadam. Volume — ma'lumot yo'qolmasligining ASOSIY kafolati
+
+1. Service → **Settings** → **Volumes** → **Add Volume**
+2. Mount path: `/data`
+3. Variables bo'limiga qo'shing: `DATA_FILE=/data/data.json`
+
+Volume — Railway'ning doimiy diski. Redeploy, restart, crash — ma'lumot joyida qoladi.
+
+### 3-qadam. Variables
+
+```bash
+BOT_TOKEN=<@BotFather dan>
+DATA_FILE=/data/data.json
+ADMIN_ID=[637554472]
+ADMIN_PASSWORD=<kuchli parol>
+TIMEZONE=Asia/Tashkent
+```
+
+### 4-qadam. GitHub zaxirasi (qo'shimcha himoya)
+
+Volume ham buzilishi yoki xato bilan o'chirilishi mumkin. Bot `data.json` ni
+davriy ravishda GitHub'ga yuklab turadi va **ishga tushganda baza bo'sh bo'lsa,
+o'sha zaxiradan avtomatik tiklaydi**.
+
+> 🔒 **Zaxira repozitoriyasi FAQAT private bo'lishi kerak.** Fayl ichida
+> bemorlarning ismi va telefon raqami bor. Bot ishga tushishda repo'ning
+> private ekanini tekshiradi va **public bo'lsa zaxiralashni o'zi o'chiradi** —
+> shaxsiy ma'lumotlar ochiq internetga chiqib ketmasligi uchun.
+
+1. GitHub'da **yangi private repozitoriy** yarating, masalan `navbat-backup`
+   (bu repo bilan bir xil bo'lishi SHART EMAS va tavsiya ham etilmaydi)
+2. Token oling: [github.com/settings/personal-access-tokens](https://github.com/settings/personal-access-tokens)
+   - *Repository access* → faqat o'sha bitta repo
+   - *Permissions* → **Contents: Read and write**
+3. Railway Variables:
+
+```bash
+BACKUP_REPO=foydalanuvchi/navbat-backup
+BACKUP_TOKEN=github_pat_...
+BACKUP_INTERVAL_MINUTES=5      # ixtiyoriy
+BACKUP_FILE=backup/data.json   # ixtiyoriy
+```
+
+Zaxira qachon yuboriladi:
+- har `BACKUP_INTERVAL_MINUTES` daqiqada — **faqat ma'lumot o'zgargan bo'lsa**
+  (keraksiz commit yaratilmaydi);
+- bot to'xtatilayotganda (Railway redeploy'dan oldin `SIGTERM` yuboradi);
+- super admin **💾 Hozir zaxiralash** tugmasini bosganda.
+
+Zaxira holati admin panelining yuqorisida ko'rinib turadi: `💾 Zaxira: ✅ 15.09.2026 18:40`
 
 ---
 
@@ -83,6 +161,7 @@ python main.py
 main.py              Kirish nuqtasi: logging, Bot/Dispatcher, startup/shutdown
 config.py            .env o'qish, konstantalar, bo'limlar va ish soatlari
 storage.py           Ma'lumotlar qatlami: JSON + indekslar, atomar yozish, parol hash
+backup.py            GitHub'ga zaxiralash va u yerdan tiklash
 utils.py             Vaqt zonasi, sana formatlash, HTML escaping
 keyboards.py         Barcha klaviaturalar
 callbacks.py         Tipli callback_data fabrikalari
@@ -93,8 +172,10 @@ handlers/
   admin.py           Admin panel: parol, navbatlar, adminlar
   fallback.py        Tushunilmagan xabarlar
   errors.py          Global xato ushlagich
-tests.py             Biznes-mantiq testlari (123 ta)
-tests_e2e.py         Uchidan-uchiga testlar (97 ta)
+tests.py             Biznes-mantiq testlari (154 ta)
+tests_e2e.py         Uchidan-uchiga testlar (113 ta)
+Dockerfile           Railway / har qanday konteyner uchun
+railway.json         Railway build va deploy sozlamalari
 ```
 
 ### Ma'lumotlar saqlanishi
@@ -126,8 +207,8 @@ Yozishda:
 ## Testlar
 
 ```bash
-python tests.py        # biznes-mantiq: 123 ta test
-python tests_e2e.py    # handlerlar: 97 ta test
+python tests.py        # biznes-mantiq: 154 ta test
+python tests_e2e.py    # handlerlar: 113 ta test
 ```
 
 E2E testlar Telegram'ga **ulanmaydi** — Bot sessiyasi soxta obyekt bilan
@@ -135,7 +216,9 @@ almashtirilgan, u yuborilgan xabarlarni ro'yxatga yig'adi.
 
 Testlar quyidagilarni tekshiradi: ro'yxatdan o'tish, navbat olish, bandlik,
 egalik tekshiruvi, admin parol oqimi, brute-force bloki, adminlarni boshqarish,
-50 ta bir vaqtdagi bron urinishi, fayl buzilgandan keyin tiklanish.
+**menyu ko'rinishi** (oddiy admin super admin bo'limlarini ko'rmasligi),
+`ADMIN_ID` ro'yxatini o'qish, 50 ta bir vaqtdagi bron urinishi,
+fayl buzilgandan keyin tiklanish, zaxira sozlamalari.
 
 ---
 
@@ -161,7 +244,10 @@ Boshqa sozlamalar: `BOOKING_DAYS_AHEAD` (necha kun oldindan), `MAX_ACTIVE_BOOKIN
 - **Avtomatik eslatma yo'q** — bemorni chaqirish admin tugmasi orqali qo'lda bajariladi.
   Rejalashtirilgan: `apscheduler` bilan qabuldan 1 kun/1 soat oldin eslatma.
 - **Bitta jarayon** — JSON saqlash bir vaqtda bitta bot nusxasiga mo'ljallangan.
-  Bir nechta nusxada (horizontal scaling) ishlatish uchun PostgreSQL kerak bo'ladi.
+  Railway'da `numReplicas` 1 da qoldirilgan. Bir nechta nusxada (horizontal scaling)
+  ishlatish uchun PostgreSQL kerak bo'ladi.
+- **Zaxira interval bilan** — hard kill (SIGKILL) bo'lsa oxirgi bir necha daqiqa
+  yo'qolishi mumkin. Shuning uchun Railway Volume asosiy himoya, GitHub esa qo'shimcha.
 - Ko'p tillilik yo'q (faqat o'zbekcha).
 
 Batafsil ro'yxat: [Task.md](Task.md)

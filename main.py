@@ -16,7 +16,8 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import BotCommand
 
 import storage as db
-from config import ADMIN_ID, BASE_DIR, BOT_TOKEN, DEFAULT_ADMIN_PASSWORD
+from backup import backup
+from config import ADMIN_IDS, BASE_DIR, BOT_TOKEN, DATA_PATH, DEFAULT_ADMIN_PASSWORD
 from handlers import setup_routers
 from handlers.errors import on_error
 
@@ -51,12 +52,20 @@ def setup_logging() -> None:
 
 
 async def on_startup(bot: Bot) -> None:
+    # TARTIB MUHIM: avval zaxirani tekshirib, kerak bo'lsa tiklaymiz,
+    # keyingina bazani ochamiz. Railway'da disk vaqtinchalik bo'lgani uchun
+    # aynan shu qadam redeploy'dan keyin ma'lumotni saqlab qoladi.
+    log.info("Ma'lumotlar fayli: %s", DATA_PATH)
+    if await backup.verify():
+        await backup.restore_if_empty()
+
     await db.connect()
 
-    # .env da ADMIN_ID ko'rsatilgan bo'lsa, u avtomatik super admin bo'ladi
-    if ADMIN_ID and not await db.is_admin(ADMIN_ID):
-        await db.add_admin(ADMIN_ID, "Asosiy admin", None, force_super=True)
-        log.info(".env dagi ADMIN_ID super admin sifatida qo'shildi: %s", ADMIN_ID)
+    # .env dagi ADMIN_ID ro'yxatidagi HAR BIR foydalanuvchi super admin bo'ladi
+    for admin_id in ADMIN_IDS:
+        if not await db.is_super_admin(admin_id):
+            await db.add_admin(admin_id, "Asosiy admin", None, force_super=True)
+            log.info(".env dagi ADMIN_ID super admin sifatida qo'shildi: %s", admin_id)
 
     if await db.count_admins() == 0:
         log.warning(
@@ -65,6 +74,8 @@ async def on_startup(bot: Bot) -> None:
             DEFAULT_ADMIN_PASSWORD,
         )
 
+    backup.start()
+
     await bot.set_my_commands(COMMANDS)
     me = await bot.get_me()
     log.info("Bot ishga tushdi: @%s", me.username)
@@ -72,6 +83,7 @@ async def on_startup(bot: Bot) -> None:
 
 async def on_shutdown() -> None:
     await db.close()
+    await backup.stop()  # to'xtashdan oldin oxirgi holatni zaxiralaydi
     log.info("Bot to'xtatildi")
 
 

@@ -127,14 +127,26 @@ def confirm_user_cancel(app_id: int) -> InlineKeyboardMarkup:
 # --------------------------------------------------------------------------
 
 def admin_menu(is_super: bool) -> InlineKeyboardMarkup:
+    """Admin menyusi.
+
+    Oddiy admin faqat navbatlar bilan ishlaydi.
+    Adminlarni boshqarish va parolni o'zgartirish tugmalari FAQAT super adminda
+    ko'rinadi — oddiy adminda ular umuman chizilmaydi.
+    """
     kb = InlineKeyboardBuilder()
     kb.button(text="📋 Navbatlar", callback_data=AdminCB(action="queue", page=0))
     kb.button(text="📊 Statistika", callback_data=AdminCB(action="stats"))
-    kb.button(text="👥 Adminlar ro'yxati", callback_data=AdminCB(action="admins"))
+
     if is_super:
+        kb.button(text="👥 Adminlar ro'yxati", callback_data=AdminCB(action="admins"))
         kb.button(text="🔑 Parolni o'zgartirish", callback_data=AdminCB(action="passwd"))
-    kb.button(text="🚪 Adminlikdan chiqish", callback_data=AdminCB(action="logout"))
-    kb.adjust(2, 1)
+        kb.button(text="💾 Hozir zaxiralash", callback_data=AdminCB(action="backup"))
+        kb.adjust(2, 2, 1)
+    else:
+        # Super admin o'zini chiqara olmaydi, shuning uchun unga bu tugma ham kerak emas
+        kb.button(text="🚪 Adminlikdan chiqish", callback_data=AdminCB(action="logout"))
+        kb.adjust(2, 1)
+
     return kb.as_markup()
 
 

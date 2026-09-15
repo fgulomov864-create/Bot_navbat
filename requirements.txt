@@ -2,6 +2,9 @@
 aiogram==3.31.0
 python-dotenv==1.2.3
 
+# GitHub'ga zaxiralash uchun (aiogram ham ishlatadi, lekin biz to'g'ridan-to'g'ri import qilamiz)
+aiohttp==3.14.3
+
 # Windows va ba'zi Linux konteynerlarida zoneinfo uchun vaqt zonasi bazasi kerak.
 # Busiz ZoneInfo("Asia/Tashkent") ZoneInfoNotFoundError bilan yiqiladi.
 tzdata==2026.4

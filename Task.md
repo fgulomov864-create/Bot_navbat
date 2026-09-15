@@ -234,10 +234,10 @@ qo'lda tugma bosganda** ishlaydi. Rejada: `apscheduler` bilan qabuldan 1 kun va
 | ✅ | `README.md` | O'rnatish, sozlash, admin panel, loyiha tuzilishi |
 | ✅ | `.gitignore` | Maxfiy fayllar va shaxsiy ma'lumotlar bloklangan |
 | ✅ | `.env.example` | Barcha sozlamalar izohi bilan |
-| ✅ | **Testlar** | `tests.py` (123 ta) + `tests_e2e.py` (97 ta) = **220 ta test** |
+| ✅ | **Testlar** | `tests.py` (154 ta) + `tests_e2e.py` (113 ta) = **267 ta test** |
 | ✅ | `requirements.txt` | Faqat to'g'ridan-to'g'ri bog'liqliklar (19 → 3 ta) + `tzdata` |
 | ✅ | Lint | `ruff check --select F,E9` toza |
-| 🔜 | `Dockerfile` | Deploy hozircha qo'lda |
+| ✅ | `Dockerfile` | Railway va har qanday konteyner uchun tayyor |
 | 🔜 | CI (GitHub Actions) | Testlarni avtomatik ishga tushirish |
 
 ---
@@ -268,19 +268,96 @@ SQL yo'q — na kod, na bog'liqlik, na fayl.
 
 ---
 
+## 🚂 Railway'ga joylash va ma'lumot yo'qolmasligi
+
+### ⚠️ Topilgan asosiy xavf
+Railway (Heroku, Render, Fly.io ham) konteynerida disk **vaqtinchalik**.
+Hech narsa qilinmasa, **har bir redeploy'da `data.json` — barcha bemorlar va
+navbatlar — o'chib ketadi**. Bu deploy qilishdan oldin hal qilinishi shart edi.
+
+### ✅ Ikki qatlamli himoya qo'shildi
+
+**1-qatlam: Railway Volume (asosiy)**
+- `Dockerfile` da `/data` papkasi tayyorlanadi, `DATA_FILE=/data/data.json`
+- `config.py` endi absolyut yo'lni tushunadi (ilgari hamma narsa loyiha
+  papkasiga nisbatan hisoblanardi — Volume ishlamasdi)
+- Volume ulangach redeploy, restart, crash — ma'lumot joyida qoladi
+
+**2-qatlam: GitHub zaxirasi ([backup.py](backup.py))**
+- Bot ishga tushganda baza bo'sh bo'lsa — GitHub'dagi oxirgi zaxiradan **avtomatik tiklaydi**
+- Har 5 daqiqada (sozlanadi) — **faqat ma'lumot o'zgargan bo'lsa** yuklaydi,
+  shuning uchun keraksiz commit yaratilmaydi
+- Bot to'xtatilayotganda majburan zaxiralaydi (Railway `SIGTERM` yuboradi)
+- Super admin **💾 Hozir zaxiralash** tugmasi bilan qo'lda ham yubora oladi
+- `git` buyrug'i kerak emas — GitHub Contents API ishlatiladi
+
+### 🔒 Zaxiradagi xavfsizlik choralari
+
+Zaxira faylida bemorlarning **ismi va telefon raqami** bo'ladi. Shuning uchun:
+
+- Bot ishga tushishda repozitoriyning **private** ekanini tekshiradi.
+  **Public bo'lsa — zaxiralashni butunlay o'chiradi** va log'ga ogohlantirish yozadi.
+  Ya'ni loyihaning eng birinchi muammosi (bemor bazasi ochiq GitHub'da) qaytalanmaydi.
+- Token'da yozish huquqi yo'qligi ham tekshiriladi.
+- Zaxira **alohida** private repo'ga yuboriladi — kod turgan repo'ga emas.
+- `.dockerignore` — `.env` va `data.json` konteyner image'iga tushmaydi.
+
+### 📁 Qo'shilgan fayllar
+`Dockerfile` · `railway.json` · `.dockerignore` · `backup.py`
+
+---
+
+## 👥 Adminlar: ro'yxat va menyu ko'rinishi
+
+### ✅ `ADMIN_ID` endi RO'YXAT
+Ilgari faqat bitta ID qabul qilinardi. Endi bir nechta super admin ko'rsatish mumkin,
+va hamma format ishlaydi:
+
+```bash
+ADMIN_ID=[]                        # hech kim
+ADMIN_ID=637554472                 # bitta
+ADMIN_ID=[637554472, 123456789]    # ikkita
+ADMIN_ID=637554472,123456789       # xuddi shunday
+```
+
+Harfli qiymat kiritilsa, bot tushunarli xato bilan to'xtaydi (jimgina noto'g'ri
+ishlamaydi). Takrorlangan ID lar olib tashlanadi.
+
+### ✅ Menyu endi darajaga qarab chiziladi
+
+| Menyu | Oddiy admin | Super admin |
+|---|---|---|
+| 📋 Navbatlar | ✅ | ✅ |
+| 📊 Statistika | ✅ | ✅ |
+| 🚪 Adminlikdan chiqish | ✅ | — *(super admin chiqa olmaydi)* |
+| 👥 Adminlar ro'yxati | ❌ **ko'rinmaydi** | ✅ |
+| 🔑 Parolni o'zgartirish | ❌ **ko'rinmaydi** | ✅ |
+| 💾 Hozir zaxiralash | ❌ **ko'rinmaydi** | ✅ |
+
+Panel matnida ham farq bor: adminlar soni va zaxira holati faqat super adminga
+ko'rsatiladi.
+
+> **Muhim:** tugma chizilmasligi o'zi himoya emas — callback'ni qo'lda yuborish
+> mumkin. Shuning uchun `admins`, `passwd`, `backup`, adminni chiqarish va
+> parolni o'rnatish — **hammasi serverda `need_super=True` bilan qayta tekshiriladi**.
+> Bu E2E testlar bilan qoplangan.
+
+---
+
 ## ✅ Tekshirish natijalari
 
 ```
-python tests.py       →  ✅ o'tdi: 123   ❌ yiqildi: 0
-python tests_e2e.py   →  ✅ o'tdi:  97   ❌ yiqildi: 0
+python tests.py       →  ✅ o'tdi: 154   ❌ yiqildi: 0
+python tests_e2e.py   →  ✅ o'tdi: 113   ❌ yiqildi: 0
 ruff check            →  All checks passed!
 Telegram ulanishi     →  OK  (@uzb123_kon_bot)
 ```
 
 Testlar quyidagilarni qoplaydi: telefon validatsiyasi, vaqt zonasi, HTML escaping,
 callback round-trip (64 bayt limiti), parol hash, adminlar iyerarxiyasi, bandlik,
-**egalik tekshiruvi**, 50 ta bir vaqtdagi bron urinishi, diskka saqlash/tiklash,
-buzilgan fayldan tiklanish, brute-force bloki.
+**egalik tekshiruvi**, **menyu ko'rinishi** (oddiy admin super admin bo'limlarini
+ko'rmasligi), `ADMIN_ID` ro'yxatini o'qish, zaxira sozlamalari, 50 ta bir vaqtdagi
+bron urinishi, diskka saqlash/tiklash, buzilgan fayldan tiklanish, brute-force bloki.
 
 ---
 
@@ -292,3 +369,7 @@ buzilgan fayldan tiklanish, brute-force bloki.
    o'zgartiring (🔑 tugmasi).
 3. **`.env` ni to'ldiring** — `BOT_TOKEN` majburiy; `ADMIN_ID` ni ko'rsatsangiz,
    parolsiz ham super admin bo'lasiz.
+4. **Railway'da Volume ulang** (`/data`) va `DATA_FILE=/data/data.json` qo'ying —
+   busiz har redeploy'da ma'lumot yo'qoladi.
+5. **Zaxira uchun alohida PRIVATE repo yarating** va `BACKUP_REPO` / `BACKUP_TOKEN`
+   ni to'ldiring. Public repo bo'lsa bot zaxiralashni o'zi o'chiradi.

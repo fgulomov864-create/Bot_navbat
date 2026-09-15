@@ -90,6 +90,71 @@ async def test_utils() -> None:
               f"olindi: {normalize_phone(raw)}")
 
 
+async def test_admin_ids_parsing() -> None:
+    print("\n📦 ADMIN_ID ro'yxati (.env)")
+    from config import _parse_ids
+
+    cases = {
+        "": [],
+        "[]": [],
+        "   ": [],
+        "637554472": [637554472],
+        "[637554472]": [637554472],
+        "[637554472, 123456789]": [637554472, 123456789],
+        "637554472,123456789": [637554472, 123456789],
+        "637554472 123456789": [637554472, 123456789],
+        "[ 637554472 , 123456789 ]": [637554472, 123456789],
+        "637554472, 637554472": [637554472],  # takror olib tashlanadi
+        "'637554472'": [637554472],
+    }
+    for raw, expected in cases.items():
+        check(f"ADMIN_ID={raw!r:26} -> {expected}", _parse_ids(raw) == expected,
+              f"olindi: {_parse_ids(raw)}")
+
+    try:
+        _parse_ids("salom")
+        check("harfli qiymat rad etiladi", False, "xato chiqmadi")
+    except RuntimeError as e:
+        check("harfli qiymat tushunarli xato beradi", "butun sonlardan" in str(e))
+
+
+async def test_backup_config() -> None:
+    print("\n📦 GitHub zaxirasi")
+    from backup import GitHubBackup
+
+    off = GitHubBackup(repo="", token="", local_path=config.DATA_PATH)
+    check("sozlanmagan zaxira o'chiq", not off.enabled)
+    check("o'chiq zaxira yuklamaydi", not await off.upload())
+    check("o'chiq zaxira tiklamaydi", not await off.restore_if_empty())
+    check("o'chiq holat matni", "o'chiq" in off.status_line(), off.status_line())
+    check("verify() o'chiqda False", not await off.verify())
+
+    on = GitHubBackup(repo="user/private-repo", token="ghp_test", local_path=config.DATA_PATH)
+    check("sozlangan zaxira yoqilgan", on.enabled)
+    check("yoqilgan holat matni", "yoqilgan" in on.status_line(), on.status_line())
+    check("interval soniyaga aylandi", on.interval == config.BACKUP_INTERVAL_MINUTES * 60)
+    check("0 interval 1 daqiqaga ko'tariladi",
+          GitHubBackup(repo="a/b", token="t", interval_minutes=0).interval == 60)
+
+    # _local_has_data — tiklash kerakmi yoki yo'qligini aniqlaydi
+    await fresh_db()
+    tmp = config.DATA_PATH
+    b = GitHubBackup(repo="a/b", token="t", local_path=tmp)
+    await db.close()
+    check("bo'sh baza 'ma'lumot yo'q' deb hisoblanadi", not b._local_has_data())
+
+    await db.connect()
+    await db.save_user(555, "Ali", None, "+998901112233")
+    await db.close()
+    check("bemor qo'shilgach 'ma'lumot bor'", b._local_has_data())
+
+    missing = GitHubBackup(repo="a/b", token="t", local_path=Path(str(tmp) + ".yoq"))
+    check("fayl yo'q bo'lsa 'ma'lumot yo'q'", not missing._local_has_data())
+
+    check("hash o'zgarishni aniqlaydi",
+          GitHubBackup._digest(b"a") != GitHubBackup._digest(b"b"))
+
+
 async def test_callbacks() -> None:
     print("\n📦 Callback data (64 bayt limiti va ':' muammosi)")
 
@@ -357,8 +422,14 @@ async def test_keyboards() -> None:
     super_menu = [b.text for row in kb.admin_menu(is_super=True).inline_keyboard for b in row]
     plain_menu = [b.text for row in kb.admin_menu(is_super=False).inline_keyboard for b in row]
     check("super adminda parol tugmasi bor", any("Parol" in t for t in super_menu))
-    check("oddiy adminda parol tugmasi YO'Q", not any("Parol" in t for t in plain_menu))
-    check("adminlar ro'yxati tugmasi hammada bor", any("Adminlar" in t for t in plain_menu))
+    check("super adminda adminlar tugmasi bor", any("Adminlar" in t for t in super_menu))
+    check("super adminda zaxira tugmasi bor", any("zaxira" in t.lower() for t in super_menu), str(super_menu))
+    check("ODDIY adminda parol tugmasi YO'Q", not any("Parol" in t for t in plain_menu))
+    check("ODDIY adminda adminlar tugmasi YO'Q", not any("Adminlar" in t for t in plain_menu), str(plain_menu))
+    check("ODDIY adminda zaxira tugmasi YO'Q", not any("zaxira" in t.lower() for t in plain_menu), str(plain_menu))
+    check("oddiy adminda navbatlar bor", any("Navbatlar" in t for t in plain_menu))
+    check("oddiy adminda chiqish tugmasi bor", any("chiqish" in t.lower() for t in plain_menu))
+    check("super adminda chiqish tugmasi YO'Q", not any("chiqish" in t.lower() for t in super_menu))
 
     days = kb.days("treatment")
     day_buttons = [b for row in days.inline_keyboard for b in row if b.callback_data.startswith("date")]
@@ -396,7 +467,7 @@ async def main() -> None:
     print("=" * 62)
 
     for test in (
-        test_utils, test_callbacks, test_password, test_admins,
+        test_utils, test_admin_ids_parsing, test_backup_config, test_callbacks, test_password, test_admins,
         test_users_and_booking, test_ownership, test_race_condition,
         test_persistence, test_corrupted_file, test_purge, test_stats,
         test_keyboards,

@@ -1,0 +1,57 @@
+# --- Maxfiy ma'lumotlar (HECH QACHON commit qilinmasin!) ---
+.env
+.env.*
+!.env.example
+
+# --- Ma'lumotlar bazasi (bemorlarning shaxsiy ma'lumotlari) ---
+data.json
+data.json.*
+*.bak.json
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+backups/
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# --- Virtual muhit ---
+.venv/
+venv/
+env/
+ENV/
+
+# --- Testlar va linterlar ---
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+.tox/
+
+# --- IDE / muharrirlar ---
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# --- Loglar ---
+*.log
+logs/
+
+# --- Operatsion tizim ---
+.DS_Store
+Thumbs.db
+desktop.ini

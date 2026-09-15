@@ -8,8 +8,11 @@ from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent
 
-# .env ni har doim loyiha papkasidan o'qiymiz (bot qayerdan ishga tushirilishidan qat'i nazar)
-load_dotenv(BASE_DIR / ".env")
+# .env ni har doim loyiha papkasidan o'qiymiz (bot qayerdan ishga tushirilishidan qat'i nazar).
+# Testlar SKIP_DOTENV=1 qo'yadi — natija ishlab chiquvchining .env fayliga bog'liq
+# bo'lib qolmasligi uchun.
+if os.getenv("SKIP_DOTENV") != "1":
+    load_dotenv(BASE_DIR / ".env")
 
 
 def _require(key: str) -> str:
@@ -33,10 +36,10 @@ def _parse_ids(raw: str) -> list[int]:
     Hammasi ishlaydi:
         ADMIN_ID=                   -> []
         ADMIN_ID=[]                 -> []
-        ADMIN_ID=637554472          -> [637554472]
-        ADMIN_ID=[637554472, 123]   -> [637554472, 123]
-        ADMIN_ID=637554472,123      -> [637554472, 123]
-        ADMIN_ID=637554472 123      -> [637554472, 123]
+        ADMIN_ID=123456789          -> [123456789]
+        ADMIN_ID=[123456789, 55]    -> [123456789, 55]
+        ADMIN_ID=123456789,55       -> [123456789, 55]
+        ADMIN_ID=123456789 55       -> [123456789, 55]
     """
     cleaned = (raw or "").strip().strip("[]()")
     parts = [p.strip().strip("'\"") for p in cleaned.replace(",", " ").split()]
@@ -51,7 +54,7 @@ def _parse_ids(raw: str) -> list[int]:
             raise RuntimeError(
                 f"❌ .env dagi ADMIN_ID butun sonlardan iborat bo'lishi kerak.\n"
                 f"   Tushunarsiz qiymat: {part!r}\n"
-                f"   Namuna: ADMIN_ID=[637554472, 123456789]"
+                f"   Namuna: ADMIN_ID=[123456789, 987654321]"
             )
         if value not in ids:
             ids.append(value)
@@ -107,6 +110,11 @@ DEFAULT_RULES: dict[str, object] = {
     "weekend_days": [6],       # 0=Dushanba ... 6=Yakshanba
 }
 
+DEFAULT_REMINDERS: dict[str, object] = {
+    "day_before": True,    # "ertaga navbatingiz bor"
+    "hours_before": 1,     # necha soat oldin eslatilsin (0 = o'chiq)
+}
+
 DEFAULT_CLINIC: dict[str, str] = {
     "address": os.getenv("CLINIC_ADDRESS", "Stomatologiya klinikasi"),
     "map_link": os.getenv("MAP_LINK", "https://maps.app.goo.gl/Ay8YVsm44MMAWxst9?g_st=ac"),
@@ -120,6 +128,7 @@ LIMITS = {
     "dept_name_length": (2, 64),
     "dept_times_count": (1, 24),
     "max_departments": 12,
+    "hours_before": (0, 24),
 }
 
 WEEKDAYS_UZ = ["Dushanba", "Seshanba", "Chorshanba", "Payshanba", "Juma", "Shanba", "Yakshanba"]
@@ -138,5 +147,11 @@ BACKUP_TOKEN = (os.getenv("BACKUP_TOKEN") or "").strip()        # GitHub Persona
 BACKUP_BRANCH = (os.getenv("BACKUP_BRANCH") or "main").strip()
 BACKUP_FILE = (os.getenv("BACKUP_FILE") or "backup/data.json").strip()
 BACKUP_INTERVAL_MINUTES = int(os.getenv("BACKUP_INTERVAL_MINUTES") or 5)
+
+# Shifrlash kaliti (ixtiyoriy, lekin PUBLIC repo uchun MAJBURIY).
+# Berilsa, zaxira scrypt + Fernet (AES-128) bilan shifrlanadi va faylni
+# faqat shu kalit bilan ochish mumkin bo'ladi.
+# ⚠️ Kalitni yo'qotsangiz, zaxirani hech kim ocholmaydi — uni saqlab qo'ying!
+BACKUP_ENCRYPT_KEY = (os.getenv("BACKUP_ENCRYPT_KEY") or "").strip()
 
 BACKUP_ENABLED = bool(BACKUP_REPO and BACKUP_TOKEN)

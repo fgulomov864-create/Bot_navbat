@@ -21,6 +21,10 @@ os.environ["BOT_TOKEN"] = "111111:TEST-TOKEN"
 os.environ["DATA_FILE"] = str(_TMP / "data.json")
 os.environ.setdefault("TIMEZONE", "Asia/Tashkent")
 
+# Testlar ishlab chiquvchining .env fayliga BOG'LIQ BO'LMASLIGI kerak —
+# aks holda natija kimning mashinasida ishlatilishiga qarab o'zgarib ketadi.
+os.environ["SKIP_DOTENV"] = "1"
+
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 

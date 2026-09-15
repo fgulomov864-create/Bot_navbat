@@ -39,6 +39,7 @@ from config import (
     DEFAULT_ADMIN_PASSWORD,
     DEFAULT_CLINIC,
     DEFAULT_DEPARTMENTS,
+    DEFAULT_REMINDERS,
     DEFAULT_RULES,
 )
 from utils import now
@@ -72,6 +73,10 @@ def _empty_db() -> dict[str, Any]:
         "appointments": [],
         "next_id": 1,
         "next_dept_id": 1,
+        # Har saqlashda oshib boradi. Zaxira bilan solishtirganda
+        # "qaysi nusxa yangiroq" degan savolga ANIQ javob beradi.
+        "revision": 0,
+        "saved_at": "",
     }
 
 
@@ -89,6 +94,7 @@ def _default_settings() -> dict[str, Any]:
             "weekend_days": list(DEFAULT_RULES["weekend_days"]),
         },
         "clinic": dict(DEFAULT_CLINIC),
+        "reminders": dict(DEFAULT_REMINDERS),
     }
 
 
@@ -121,8 +127,19 @@ def _write_atomic(path: Path, payload: str) -> None:
 
 async def _persist() -> None:
     """Xotiradagi holatni diskka yozadi (fayl amali alohida oqimda — event loop bloklanmaydi)."""
+    _data["revision"] = int(_data.get("revision", 0)) + 1
+    _data["saved_at"] = now().isoformat(timespec="seconds")
     payload = json.dumps(_data, ensure_ascii=False, indent=2)
     await asyncio.to_thread(_write_atomic, DATA_PATH, payload)
+
+
+def revision() -> int:
+    """Bazaning joriy versiyasi — zaxira bilan solishtirish uchun."""
+    return int(_data.get("revision", 0))
+
+
+def saved_at() -> str:
+    return _data.get("saved_at", "")
 
 
 def _reindex() -> None:
@@ -260,6 +277,10 @@ def clinic() -> dict:
     return _data["settings"].get("clinic", dict(DEFAULT_CLINIC))
 
 
+def reminders() -> dict:
+    return _data["settings"].get("reminders", dict(DEFAULT_REMINDERS))
+
+
 # --------------------------------------------------------------------------
 # Sozlamalarni O'ZGARTIRISH (admin paneli uchun)
 # --------------------------------------------------------------------------
@@ -269,6 +290,13 @@ async def set_rule(name: str, value) -> None:
         _data["settings"].setdefault("rules", {})[name] = value
         await _persist()
     log.info("Sozlama o'zgartirildi: rules.%s = %r", name, value)
+
+
+async def set_reminder(field: str, value) -> None:
+    async with _lock:
+        _data["settings"].setdefault("reminders", {})[field] = value
+        await _persist()
+    log.info("Sozlama o'zgartirildi: reminders.%s = %r", field, value)
 
 
 async def set_clinic(field: str, value: str) -> None:
@@ -641,6 +669,23 @@ def _upcoming() -> list[dict]:
         if _by_id[app_id]["booking_date"] >= today
     ]
     return sorted(rows, key=lambda a: (a["booking_date"], a["booking_time"]))
+
+
+def active_future_bookings() -> list[dict]:
+    """Bugundan boshlab barcha faol navbatlar (eslatmalar uchun)."""
+    return [_by_id[app_id] for app_id in _by_slot.values()
+            if _by_id[app_id]["booking_date"] >= now().strftime("%Y-%m-%d")]
+
+
+async def mark_reminded(app_id: int, kind: str) -> bool:
+    """Eslatma yuborilganini belgilaydi — takror yuborilmasligi uchun."""
+    async with _lock:
+        appt = _by_id.get(app_id)
+        if not appt:
+            return False
+        appt.setdefault("reminded", {})[kind] = True
+        await _persist()
+        return True
 
 
 async def upcoming_bookings(limit: int, offset: int) -> list[dict]:

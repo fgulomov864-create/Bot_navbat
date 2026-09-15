@@ -19,6 +19,7 @@ import storage as db
 from backup import backup
 from config import ADMIN_IDS, BASE_DIR, BOT_TOKEN, DATA_PATH, DEFAULT_ADMIN_PASSWORD
 from handlers import setup_routers
+from reminders import reminders
 from handlers.errors import on_error
 
 log = logging.getLogger(__name__)
@@ -57,7 +58,7 @@ async def on_startup(bot: Bot) -> None:
     # aynan shu qadam redeploy'dan keyin ma'lumotni saqlab qoladi.
     log.info("Ma'lumotlar fayli: %s", DATA_PATH)
     if await backup.verify():
-        await backup.restore_if_empty()
+        await backup.sync_on_startup()
 
     await db.connect()
 
@@ -75,6 +76,7 @@ async def on_startup(bot: Bot) -> None:
         )
 
     backup.start()
+    reminders.start(bot)
 
     await bot.set_my_commands(COMMANDS)
     me = await bot.get_me()
@@ -82,6 +84,7 @@ async def on_startup(bot: Bot) -> None:
 
 
 async def on_shutdown() -> None:
+    await reminders.stop()
     await db.close()
     await backup.stop()  # to'xtashdan oldin oxirgi holatni zaxiralaydi
     log.info("Bot to'xtatildi")

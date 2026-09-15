@@ -52,6 +52,7 @@ qilish kerak emas**. Super admin panelda o'zgartiradi — bemorlar darhol ko'rad
 | 🏥 Bo'limlar va soatlar | Bo'lim qo'shish/o'chirish, nomini va ish soatlarini o'zgartirish, tartibini almashtirish |
 | 📅 Navbat qoidalari | Necha kun oldindan yozilish · bemorga navbat limiti · qabulgacha minimal vaqt · dam olish kunlari |
 | 📍 Klinika ma'lumotlari | Manzil matni va Google Maps havolasi |
+| 🔔 Eslatmalar | Kun oldin / soat oldin avtomatik eslatmani yoqish-o'chirish |
 | ♻️ Standart holatga qaytarish | Sozlamalarni boshlang'ich holatga qaytaradi (bemorlar, navbatlar, adminlar va parol **tegilmaydi**) |
 
 Soatlar oddiy matn bilan kiritiladi — `09:00, 10:30, 12:00`. Bot `9:00` ni ham
@@ -95,6 +96,8 @@ python main.py
 | `DATA_FILE` | ❌ | Default: `data.json`. Railway'da: `/data/data.json` |
 | `CLINIC_ADDRESS`, `MAP_LINK` | ❌ | Manzil va xarita havolasi |
 | `BACKUP_REPO`, `BACKUP_TOKEN` | ❌ | GitHub zaxirasi — pastga qarang |
+| `BACKUP_BRANCH` | ❌ | Default `main`. Railway bilan **`backup`** qiling |
+| `BACKUP_ENCRYPT_KEY` | ❌ | Public repo'ga zaxiralasangiz — **majburiy** |
 
 `ADMIN_ID` bir nechta odamni qabul qiladi, hamma format ishlaydi:
 
@@ -145,24 +148,52 @@ Volume ham buzilishi yoki xato bilan o'chirilishi mumkin. Bot `data.json` ni
 davriy ravishda GitHub'ga yuklab turadi va **ishga tushganda baza bo'sh bo'lsa,
 o'sha zaxiradan avtomatik tiklaydi**.
 
-> 🔒 **Zaxira repozitoriyasi FAQAT private bo'lishi kerak.** Fayl ichida
-> bemorlarning ismi va telefon raqami bor. Bot ishga tushishda repo'ning
-> private ekanini tekshiradi va **public bo'lsa zaxiralashni o'zi o'chiradi** —
-> shaxsiy ma'lumotlar ochiq internetga chiqib ketmasligi uchun.
+> 🔒 **Zaxirada bemorlarning ismi va telefon raqami bo'ladi.** Shuning uchun
+> ikki rejimdan biri talab qilinadi:
+> - **private repo** — oddiy JSON yoziladi;
+> - **public repo** — `BACKUP_ENCRYPT_KEY` majburiy, fayl shifrlanadi.
+>
+> Kalitsiz public repo aniqlansa, bot zaxiralashni **o'zi o'chiradi**.
 
-1. GitHub'da **yangi private repozitoriy** yarating, masalan `navbat-backup`
-   (bu repo bilan bir xil bo'lishi SHART EMAS va tavsiya ham etilmaydi)
-2. Token oling: [github.com/settings/personal-access-tokens](https://github.com/settings/personal-access-tokens)
-   - *Repository access* → faqat o'sha bitta repo
+> ⚠️ **Zaxira `main` shoxiga yozilmasin!** Railway `main` ga har push'da qayta
+> deploy qiladi: zaxira → deploy → bot qayta ishga tushadi → yana zaxira →
+> cheksiz sikl. Shuning uchun `BACKUP_BRANCH=backup` ishlatiladi
+> (shox bo'lmasa, bot uni o'zi yaratadi).
+
+1. Token oling: [github.com/settings/personal-access-tokens](https://github.com/settings/personal-access-tokens)
+   - *Repository access* → faqat kerakli repo
    - *Permissions* → **Contents: Read and write**
+2. Shifrlash kaliti yarating (public repo uchun majburiy):
+
+```bash
+python -c "import secrets,string; print(''.join(secrets.choice(string.ascii_letters+string.digits) for _ in range(48)))"
+```
+
 3. Railway Variables:
 
 ```bash
-BACKUP_REPO=foydalanuvchi/navbat-backup
+BACKUP_REPO=foydalanuvchi/repo
 BACKUP_TOKEN=github_pat_...
+BACKUP_BRANCH=backup           # main EMAS!
+BACKUP_ENCRYPT_KEY=<yuqoridagi kalit>
 BACKUP_INTERVAL_MINUTES=5      # ixtiyoriy
-BACKUP_FILE=backup/data.json   # ixtiyoriy
 ```
+
+⚠️ **Shifr kalitini yo'qotmang** — yo'qolsa, zaxirani hech kim ocholmaydi.
+Zaxirani qo'lda ochish: `python backup.py --decrypt backup.enc data.json`
+
+### Ma'lumot qayerdan qaytadi
+
+Ishga tushganda lokal fayl va zaxira solishtiriladi — **`revision` raqami
+kattarog'i yutadi**:
+
+| Holat | Natija |
+|---|---|
+| Lokal yo'q yoki bo'sh | GitHub'dan tiklanadi |
+| GitHub'da zaxira yo'q | Lokal qoladi |
+| GitHub yangiroq | GitHub'dan tiklanadi, lokal `.before-restore.bak` ga saqlanadi |
+| Lokal yangiroq yoki teng | Lokal qoladi |
+| Zaxira buzilgan / kalit noto'g'ri | Lokal qoladi, ma'lumot buzilmaydi |
 
 Zaxira qachon yuboriladi:
 - har `BACKUP_INTERVAL_MINUTES` daqiqada — **faqat ma'lumot o'zgargan bo'lsa**
@@ -180,7 +211,8 @@ Zaxira holati admin panelining yuqorisida ko'rinib turadi: `💾 Zaxira: ✅ 15.
 main.py              Kirish nuqtasi: logging, Bot/Dispatcher, startup/shutdown
 config.py            .env o'qish, konstantalar, bo'limlar va ish soatlari
 storage.py           Ma'lumotlar qatlami: JSON + indekslar, atomar yozish, parol hash
-backup.py            GitHub'ga zaxiralash va u yerdan tiklash
+backup.py            GitHub'ga zaxiralash, shifrlash, tiklash
+reminders.py         🔔 Avtomatik eslatmalar (kun oldin / soat oldin)
 utils.py             Vaqt zonasi, sana formatlash, HTML escaping
 keyboards.py         Barcha klaviaturalar
 callbacks.py         Tipli callback_data fabrikalari
@@ -192,7 +224,7 @@ handlers/
   settings.py        ⚙️ Sozlamalar: bo'limlar, soatlar, qoidalar, klinika
   fallback.py        Tushunilmagan xabarlar
   errors.py          Global xato ushlagich
-tests.py             Biznes-mantiq testlari (212 ta)
+tests.py             Biznes-mantiq testlari (255 ta)
 tests_e2e.py         Uchidan-uchiga testlar (153 ta)
 Dockerfile           Railway / har qanday konteyner uchun
 railway.json         Railway build va deploy sozlamalari
@@ -232,7 +264,7 @@ Yozishda:
 ## Testlar
 
 ```bash
-python tests.py        # biznes-mantiq: 212 ta test
+python tests.py        # biznes-mantiq: 255 ta test
 python tests_e2e.py    # handlerlar: 153 ta test
 ```
 
@@ -264,8 +296,6 @@ Kod darajasida qoladiganlar ([config.py](config.py)):
 
 ## Ma'lum cheklovlar
 
-- **Avtomatik eslatma yo'q** — bemorni chaqirish admin tugmasi orqali qo'lda bajariladi.
-  Rejalashtirilgan: `apscheduler` bilan qabuldan 1 kun/1 soat oldin eslatma.
 - **Bitta jarayon** — JSON saqlash bir vaqtda bitta bot nusxasiga mo'ljallangan.
   Railway'da `numReplicas` 1 da qoldirilgan. Bir nechta nusxada (horizontal scaling)
   ishlatish uchun PostgreSQL kerak bo'ladi.

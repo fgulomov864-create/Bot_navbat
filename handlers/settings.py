@@ -53,6 +53,16 @@ async def _ask(callback: CallbackQuery, state: FSMContext, what: str, prompt: st
     await callback.answer()
 
 
+def _reminders_short() -> str:
+    r = db.reminders()
+    parts = []
+    if r.get("day_before"):
+        parts.append("kun oldin")
+    if int(r.get("hours_before") or 0):
+        parts.append(f"{r['hours_before']} soat oldin")
+    return ", ".join(parts) or "o'chiq"
+
+
 def _settings_text() -> str:
     depts = db.departments()
     weekend = set(db.rule("weekend_days") or [])
@@ -356,6 +366,57 @@ async def cb_weekday_toggle(callback: CallbackQuery, callback_data: AdminSetCB) 
 
 
 # --------------------------------------------------------------------------
+# 🔔 Eslatmalar
+# --------------------------------------------------------------------------
+
+def _reminders_text() -> str:
+    r = db.reminders()
+    hours = int(r.get("hours_before") or 0)
+    day = "yoqilgan" if r.get("day_before") else "o'chiq"
+    hour = f"{hours} soat" if hours else "o'chiq"
+    return (
+        "🔔 <b>Avtomatik eslatmalar</b>\n\n"
+        "Bot bemorga qabul yaqinlashganda o'zi xabar beradi.\n\n"
+        f"📅 Kun oldin: <b>{day}</b>\n"
+        f"⏰ Soat oldin: <b>{hour}</b>\n\n"
+        "<i>Kun oldingi eslatma qabulga 2 soatdan kam qolganda yuborilmaydi.</i>"
+    )
+
+
+@router.callback_query(AdminCB.filter(F.action == "reminders"))
+async def cb_reminders(callback: CallbackQuery, state: FSMContext) -> None:
+    if not await _super(callback):
+        return
+    await state.clear()
+    await edit_safe(callback.message, _reminders_text(), reply_markup=kb.reminders_menu())
+    await callback.answer()
+
+
+@router.callback_query(AdminSetCB.filter(F.action == "rem_day"))
+async def cb_reminder_day(callback: CallbackQuery) -> None:
+    if not await _super(callback):
+        return
+    new_value = not db.reminders().get("day_before")
+    await db.set_reminder("day_before", new_value)
+    await callback.answer("🟢 Yoqildi" if new_value else "🔴 O'chirildi")
+    await edit_safe(callback.message, _reminders_text(), reply_markup=kb.reminders_menu())
+
+
+@router.callback_query(AdminSetCB.filter(F.action == "rem_hours"))
+async def cb_reminder_hours(callback: CallbackQuery, state: FSMContext) -> None:
+    if not await _super(callback):
+        return
+    low, high = LIMITS["hours_before"]
+    await _ask(
+        callback, state, "reminder_hours",
+        f"⏰ <b>Qabuldan necha soat oldin eslatilsin?</b>\n\n"
+        f"Hozirgi qiymat: <b>{db.reminders().get('hours_before', 0)}</b>\n"
+        f"Ruxsat etilgan oraliq: <b>{low}…{high}</b> (0 = o'chirish)\n\n"
+        f"Sonni yuboring:",
+    )
+
+
+# --------------------------------------------------------------------------
 # Klinika ma'lumotlari
 # --------------------------------------------------------------------------
 
@@ -437,6 +498,7 @@ async def on_value(message: Message, state: FSMContext) -> None:
         "new_dept_name": _save_new_dept_name,
         "new_dept_times": _save_new_dept_times,
         "rule": _save_rule,
+        "reminder_hours": _save_reminder_hours,
         "clinic_address": _save_address,
         "clinic_map": _save_map,
     }.get(what)
@@ -550,6 +612,25 @@ async def _save_rule(message: Message, state: FSMContext, data: dict, value: str
     await db.set_rule(field, number)
     await state.clear()
     await _reopen_settings(message, f"✅ Saqlandi: <b>{number}</b>")
+
+
+async def _save_reminder_hours(message: Message, state: FSMContext, data: dict, value: str) -> None:
+    low, high = LIMITS["hours_before"]
+    try:
+        number = int(value)
+    except ValueError:
+        await message.answer(f"❌ Son kiriting ({low}…{high}). Qayta yuboring:")
+        return
+    if not low <= number <= high:
+        await message.answer(f"❌ Qiymat {low}…{high} oralig'ida bo'lsin. Qayta yuboring:")
+        return
+
+    await db.set_reminder("hours_before", number)
+    await state.clear()
+    await _reopen_settings(
+        message,
+        f"✅ Saqlandi: {'eslatma o‘chirildi' if number == 0 else f'{number} soat oldin eslatiladi'}",
+    )
 
 
 async def _save_address(message: Message, state: FSMContext, data: dict, value: str) -> None:

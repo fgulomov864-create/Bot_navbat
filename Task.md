@@ -215,10 +215,21 @@ blok; super adminni hech kim (o'zi ham) chiqara olmaydi.
 - `MAX_ACTIVE_BOOKINGS = 3` limiti
 - `storage.purge_old()` — eski yopilgan yozuvlarni tozalash
 
-### 🔜 4.1. Avtomatik eslatma
-Bemorga «ogohlantirish yuboriladi» deb va'da qilinadi, lekin bu hali ham **admin
-qo'lda tugma bosganda** ishlaydi. Rejada: `apscheduler` bilan qabuldan 1 kun va
-1 soat oldin avtomatik eslatma.
+### ✅ 4.1. Avtomatik eslatma
+Bemorga «ogohlantirish yuboriladi» deb va'da qilinardi, lekin bu faqat admin
+qo'lda tugma bosganda ishlardi — ya'ni bot bemorga yolg'on va'da berardi.
+
+**Bajarildi** ([reminders.py](reminders.py)) — tashqi kutubxonasiz, oddiy
+asyncio sikli har daqiqada tekshiradi:
+- 📅 **kun oldin** — «ertaga qabulingiz bor»
+- ⏰ **soat oldin** — «1 soatdan keyin qabulingiz boshlanadi» (soat soni sozlanadi)
+
+Nozik joylar:
+- Har eslatma navbat yozuvida belgilanadi (`reminded`) — bot qayta ishga tushsa
+  ham bir xil xabar ikki marta ketmaydi;
+- qabulga 2 soatdan kam qolgan navbatga «ertaga» deb yozilmaydi;
+- bekor qilingan va o'tib ketgan navbatlarga eslatma yuborilmaydi;
+- ikkalasi ham panelda (⚙️ Sozlamalar → 🔔 Eslatmalar) yoqib/o'chiriladi.
 
 ### ✅ Ish soatlarini bot orqali o'zgartirish
 Bajarildi — pastdagi «⚙️ Hamma sozlamalar» bo'limiga qarang.
@@ -236,11 +247,11 @@ Bajarildi — pastdagi «⚙️ Hamma sozlamalar» bo'limiga qarang.
 | ✅ | `README.md` | O'rnatish, sozlash, admin panel, loyiha tuzilishi |
 | ✅ | `.gitignore` | Maxfiy fayllar va shaxsiy ma'lumotlar bloklangan |
 | ✅ | `.env.example` | Barcha sozlamalar izohi bilan |
-| ✅ | **Testlar** | `tests.py` (212 ta) + `tests_e2e.py` (153 ta) = **365 ta test** |
+| ✅ | **Testlar** | `tests.py` (255 ta) + `tests_e2e.py` (153 ta) = **408 ta test** |
 | ✅ | `requirements.txt` | Faqat to'g'ridan-to'g'ri bog'liqliklar (19 → 3 ta) + `tzdata` |
 | ✅ | Lint | `ruff check --select F,E9` toza |
 | ✅ | `Dockerfile` | Railway va har qanday konteyner uchun tayyor |
-| 🔜 | CI (GitHub Actions) | Testlarni avtomatik ishga tushirish |
+| 🔜 | CI (GitHub Actions) | Testlarni avtomatik ishga tushirish — yagona qolgan band |
 
 ---
 
@@ -304,8 +315,31 @@ Zaxira faylida bemorlarning **ismi va telefon raqami** bo'ladi. Shuning uchun:
 - Zaxira **alohida** private repo'ga yuboriladi — kod turgan repo'ga emas.
 - `.dockerignore` — `.env` va `data.json` konteyner image'iga tushmaydi.
 
+### 🔒 Zaxirani shifrlash va PUBLIC repo masalasi
+
+Zaxirani **o'z kod repozitoriysiga** (`fgulomov864-create/Bot_navbat`) yozish
+so'ralgan edi. Lekin u **public** — bemorlarning ismi va telefoni ochiq
+internetga chiqib ketardi. Ikki muammo ham hal qilindi:
+
+**1. Shifrlash.** `BACKUP_ENCRYPT_KEY` berilsa, zaxira `scrypt` + `Fernet`
+(AES-128 + HMAC) bilan shifrlanadi. GitHub'da o'qib bo'lmaydigan blob turadi —
+test bilan tekshirilgan: shifrlangan faylda na ism, na telefon, hatto `phone`
+so'zi ham topilmaydi. Kalitsiz yoki noto'g'ri kalit bilan ochilmaydi, fayl
+bir bayt o'zgartirilsa ham rad etiladi.
+
+Shifrlash yoqilmagan bo'lsa — bot public repo'ga yozishdan **bosh tortadi**
+(eski xatti-harakat saqlanib qoldi).
+
+Zaxirani qo'lda ochish: `python backup.py --decrypt backup.enc data.json`
+
+**2. Deploy sikli.** Zaxira `main` shoxiga yozilsa, Railway har zaxirada qayta
+deploy qilardi → bot qayta ishga tushardi → yana zaxira → **cheksiz sikl**.
+Yechim: zaxira alohida `backup` shoxiga yoziladi (`BACKUP_BRANCH=backup`).
+Shox mavjud bo'lmasa, bot uni o'zi yaratadi. Asosiy shox tanlansa,
+log'ga ogohlantirish chiqadi.
+
 ### 📁 Qo'shilgan fayllar
-`Dockerfile` · `railway.json` · `.dockerignore` · `backup.py`
+`Dockerfile` · `railway.json` · `.dockerignore` · `backup.py` · `reminders.py`
 
 ---
 
@@ -388,10 +422,33 @@ faqat **birinchi ishga tushish** uchun boshlang'ich qiymat. Keyin manba — `dat
 
 ---
 
+## 🔄 Ma'lumot QAYERDAN qaytadi — bitta aniq qoida
+
+Ilgari tiklash «lokal bo'sh bo'lsa — zaxiradan ol» tamoyilida ishlardi.
+Bu yetarli emas edi: Volume'da eski nusxa qolib ketsa, u yangi zaxirani
+bosib turardi va qaysi biri to'g'riligi noaniq bo'lardi.
+
+**Endi har saqlashda `revision` raqami oshadi** va ishga tushganda ikkala
+nusxa solishtiriladi — **yangirog'i yutadi**:
+
+| Holat | Natija |
+|---|---|
+| Lokal fayl yo'q yoki bo'sh | GitHub'dan tiklanadi |
+| GitHub'da zaxira yo'q | Lokal qoladi |
+| GitHub `revision` > lokal | GitHub'dan tiklanadi, lokal nusxa `.before-restore.bak` ga saqlanadi |
+| Lokal `revision` >= GitHub | Lokal qoladi |
+| Zaxira buzilgan / kalit noto'g'ri | Lokal qoladi, ma'lumot buzilmaydi |
+
+Shu sababli yangi serverga ko'chirilganda ham, Volume tiklanganda ham
+**eng so'nggi holat** qaytadi va hech qachon jimgina ustiga yozilmaydi.
+Barcha holatlar test bilan qoplangan.
+
+---
+
 ## ✅ Tekshirish natijalari
 
 ```
-python tests.py       →  ✅ o'tdi: 212   ❌ yiqildi: 0
+python tests.py       →  ✅ o'tdi: 255   ❌ yiqildi: 0
 python tests_e2e.py   →  ✅ o'tdi: 153   ❌ yiqildi: 0
 ruff check            →  All checks passed!
 Telegram ulanishi     →  OK  (@uzb123_kon_bot)
@@ -402,6 +459,28 @@ callback round-trip (64 bayt limiti), parol hash, adminlar iyerarxiyasi, bandlik
 **egalik tekshiruvi**, **menyu ko'rinishi** (oddiy admin super admin bo'limlarini
 ko'rmasligi), `ADMIN_ID` ro'yxatini o'qish, zaxira sozlamalari, 50 ta bir vaqtdagi
 bron urinishi, diskka saqlash/tiklash, buzilgan fayldan tiklanish, brute-force bloki.
+
+---
+
+## 📋 Bajarilganlik tekshiruvi
+
+Ro'yxatdagi har bir da'vo haqiqiy kodga solishtirib tekshirildi
+(`.gitignore`, git indeksi, handlerlar, `storage.py`, `backup.py`).
+
+| Daraja | Holat |
+|---|---|
+| 🔴 1-daraja (xavfsizlik) | 7 / 7 ✅ |
+| 🟠 2-daraja (xatolar) | 13 / 13 ✅ |
+| 🟡 3-daraja (arxitektura) | 9 / 9 ✅ |
+| 🟢 4-daraja (funksiyalar) | 5 / 5 ✅ *(4.1 shu bosqichda yakunlandi)* |
+| 🔵 5-daraja (infratuzilma) | 7 / 8 — faqat **CI** qolgan |
+
+Tekshiruv paytida yana ikkita narsa tuzatildi:
+- `config.py` va `tests.py` izohlarida haqiqiy Telegram ID (`637554472`) namuna
+  sifatida qolib ketgan edi — public repo uchun keraksiz, neytral raqamga almashtirildi;
+- testlar ishlab chiquvchining `.env` fayliga bog'liq edi (`.env` da
+  `BACKUP_ENCRYPT_KEY` paydo bo'lishi bilan bitta test yiqildi). Endi testlar
+  `SKIP_DOTENV=1` bilan ishlaydi va muhitdan mustaqil.
 
 ---
 

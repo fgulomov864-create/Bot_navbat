@@ -20,6 +20,10 @@ os.environ["BOT_TOKEN"] = "111111:TEST-TOKEN"
 os.environ["DATA_FILE"] = str(_TMP / "data.json")
 os.environ.setdefault("TIMEZONE", "Asia/Tashkent")
 
+# Testlar ishlab chiquvchining .env fayliga BOG'LIQ BO'LMASLIGI kerak —
+# aks holda natija kimning mashinasida ishlatilishiga qarab o'zgarib ketadi.
+os.environ["SKIP_DOTENV"] = "1"
+
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
@@ -125,12 +129,15 @@ async def test_backup_config() -> None:
     off = GitHubBackup(repo="", token="", local_path=config.DATA_PATH)
     check("sozlanmagan zaxira o'chiq", not off.enabled)
     check("o'chiq zaxira yuklamaydi", not await off.upload())
-    check("o'chiq zaxira tiklamaydi", not await off.restore_if_empty())
+    check("o'chiq zaxira tiklamaydi", await off.sync_on_startup() == "disabled")
     check("o'chiq holat matni", "o'chiq" in off.status_line(), off.status_line())
     check("verify() o'chiqda False", not await off.verify())
 
     on = GitHubBackup(repo="user/private-repo", token="ghp_test", local_path=config.DATA_PATH)
     check("sozlangan zaxira yoqilgan", on.enabled)
+    check("kalitsiz shifrlash o'chiq", not on.encrypted)
+    check("kalit berilsa shifrlash yoqiladi",
+          GitHubBackup(repo="a/b", token="t", encrypt_key="k").encrypted)
     check("yoqilgan holat matni", "yoqilgan" in on.status_line(), on.status_line())
     check("interval soniyaga aylandi", on.interval == config.BACKUP_INTERVAL_MINUTES * 60)
     check("0 interval 1 daqiqaga ko'tariladi",
@@ -153,6 +160,195 @@ async def test_backup_config() -> None:
 
     check("hash o'zgarishni aniqlaydi",
           GitHubBackup._digest(b"a") != GitHubBackup._digest(b"b"))
+
+
+async def test_backup_encryption() -> None:
+    print("\n📦 Zaxirani shifrlash")
+    from backup import decrypt, encrypt, is_encrypted
+
+    secret = json.dumps({"users": {"1": {"full_name": "Ali Valiyev", "phone": "+998901112233"}}},
+                        ensure_ascii=False)
+
+    blob = encrypt(secret, "maxfiy-kalit")
+    check("shifrlangan fayl belgisi bor", is_encrypted(blob))
+    check("ochiq JSON shifrlangan deb hisoblanmaydi", not is_encrypted(secret.encode()))
+
+    # Eng muhimi: shifrlangan faylda shaxsiy ma'lumot KO'RINMASLIGI kerak
+    check("ism shifrlangan faylda ko'rinmaydi", b"Ali Valiyev" not in blob)
+    check("telefon shifrlangan faylda ko'rinmaydi", b"+998901112233" not in blob)
+    check("'phone' kaliti ham ko'rinmaydi", b"phone" not in blob)
+
+    check("to'g'ri kalit bilan ochiladi", decrypt(blob, "maxfiy-kalit") == secret)
+    check("NOTO'G'RI kalit bilan ochilmaydi", decrypt(blob, "boshqa-kalit") is None)
+    check("bo'sh kalit bilan ochilmaydi", decrypt(blob, "") is None)
+    check("shifrlanmagan faylni deshifrlash None", decrypt(secret.encode(), "kalit") is None)
+
+    buzuq = blob[:-5] + b"XXXXX"
+    check("buzilgan fayl ochilmaydi (yaxlitlik tekshiriladi)", decrypt(buzuq, "maxfiy-kalit") is None)
+
+    # Har safar yangi salt — bir xil matn har xil shifrlanadi
+    check("takroriy shifrlash har xil natija beradi", encrypt(secret, "k") != encrypt(secret, "k"))
+    check("lekin ikkalasi ham ochiladi",
+          decrypt(encrypt(secret, "k"), "k") == decrypt(encrypt(secret, "k"), "k") == secret)
+
+
+async def test_backup_restore_logic() -> None:
+    print("\n📦 Zaxiradan tiklash: 'eng yangi nusxa yutadi'")
+    from backup import GitHubBackup
+
+    await fresh_db()
+    path = config.DATA_PATH
+    b = GitHubBackup(repo="a/b", token="t", local_path=path)
+
+    def remote(revision: int, users: int = 1) -> str:
+        return json.dumps({
+            "revision": revision,
+            "saved_at": "2026-09-15T10:00:00+05:00",
+            "users": {str(i): {"full_name": f"Bemor {i}", "phone": "+998901112233"} for i in range(users)},
+            "appointments": [],
+            "admins": {},
+            "settings": {},
+        }, ensure_ascii=False)
+
+    # 1) Lokal bo'sh -> zaxiradan tiklanadi
+    await db.close()
+    path.unlink(missing_ok=True)
+    b._download = lambda: _async(remote(5, users=3))
+    check("lokal yo'q -> tiklandi", await b.sync_on_startup() == "restored")
+    await db.connect()
+    check("tiklangan bemorlar o'qildi", await db.count_users() == 3, str(await db.count_users()))
+
+    # 2) Lokal YANGIROQ -> tegilmaydi
+    await db.save_user(999, "Yangi bemor", None, "+998901119999")
+    local_rev = db.revision()
+    await db.close()
+    b._download = lambda: _async(remote(1))
+    check("lokal yangiroq -> tiklanmadi", await b.sync_on_startup() == "local")
+    await db.connect()
+    check("yangi bemor o'chib ketmadi", await db.is_registered(999))
+    check("revision oshib bordi", db.revision() >= local_rev)
+
+    # 3) Zaxira YANGIROQ -> tiklanadi, lokal nusxa chetga olinadi
+    await db.close()
+    b._download = lambda: _async(remote(99999, users=7))
+    check("zaxira yangiroq -> tiklandi", await b.sync_on_startup() == "restored")
+    safety = Path(str(path) + ".before-restore.bak")
+    check("lokal nusxa YO'QOLMADI (.before-restore.bak)", safety.exists())
+    check("saqlangan nusxada eski bemor bor", "998901119999" in safety.read_text(encoding="utf-8"))
+    await db.connect()
+    check("zaxiradagi bemorlar tiklandi", await db.count_users() == 7)
+
+    # 4) Zaxira yo'q -> lokal qoladi
+    b._download = lambda: _async(None)
+    check("zaxira yo'q -> lokal qoladi", await b.sync_on_startup() == "no-backup")
+    await db.connect()
+    check("ma'lumot joyida", await db.count_users() == 7)
+
+    # 5) Buzilgan zaxira -> lokal qoladi (ma'lumot yo'qolmaydi)
+    b._download = lambda: _async("{ buzuq json")
+    check("buzilgan zaxira -> lokal qoladi", await b.sync_on_startup() == "local")
+    await db.connect()
+    check("buzilgan zaxira ma'lumotni buzmadi", await db.count_users() == 7)
+
+    # 6) Zaxira o'chiq bo'lsa
+    off = GitHubBackup(repo="", token="", local_path=path)
+    check("o'chiq zaxira hech narsa qilmaydi", await off.sync_on_startup() == "disabled")
+
+    safety.unlink(missing_ok=True)
+
+
+def _async(value):
+    """Testlarda _download() ni almashtirish uchun kichik yordamchi."""
+    async def _inner():
+        return value
+    return _inner()
+
+
+async def test_reminders() -> None:
+    print("\n📦 🔔 Avtomatik eslatmalar")
+    from datetime import timedelta
+
+    import reminders as rem
+
+    await fresh_db()
+    check("standart: kun oldin yoqilgan", db.reminders()["day_before"] is True)
+    check("standart: 1 soat oldin", db.reminders()["hours_before"] == 1)
+
+    await db.save_user(555, "Ali", None, "+998901112233")
+
+    # Yuborilgan xabarlarni yig'ib boruvchi soxta bot
+    sent: list[tuple[int, str]] = []
+
+    class FakeBot:
+        async def send_message(self, chat_id, text, **kw):
+            sent.append((chat_id, text))
+
+    fake = FakeBot()
+
+    async def make(delta: timedelta) -> int:
+        moment = now() + delta
+        return await db.create_booking(
+            555, "treatment", TREAT, moment.strftime("%Y-%m-%d"), moment.strftime("%H:%M")
+        )
+
+    # 1) Uzoqdagi navbat — hali eslatma kerak emas
+    far = await make(timedelta(days=5))
+    await rem._send_due(fake)
+    check("5 kun qolganda eslatma yuborilmaydi", not sent, str(sent))
+    check("belgi qo'yilmadi", not (await db.get_booking(far)).get("reminded"))
+
+    # 2) 20 soat qolgan — kunlik eslatma ketishi kerak
+    sent.clear()
+    day = await make(timedelta(hours=20))
+    await rem._send_due(fake)
+    check("20 soat qolganda kunlik eslatma ketdi", any("ertaga" in t.lower() for _, t in sent), str(sent))
+    check("kunlik eslatma belgilandi", (await db.get_booking(day))["reminded"].get("day") is True)
+
+    # 3) Takroriy yuborilmaydi
+    sent.clear()
+    await rem._send_due(fake)
+    check("kunlik eslatma IKKI MARTA yuborilmaydi", not sent, str(sent))
+
+    # 4) 30 daqiqa qolgan — soatlik eslatma, kunlik esa YUBORILMAYDI
+    sent.clear()
+    soon = await make(timedelta(minutes=30))
+    await rem._send_due(fake)
+    texts = " ".join(t for _, t in sent)
+    check("30 daqiqa qolganda soatlik eslatma ketdi", "soatdan keyin" in texts, str(sent))
+    check("bunda 'ertaga' deb yozilmadi", "ertaga" not in texts.lower(), str(sent))
+    check("kunlik eslatma o'rinsiz deb belgilandi",
+          (await db.get_booking(soon))["reminded"].get("day") is True)
+
+    # 5) O'tib ketgan navbatga eslatma yo'q
+    sent.clear()
+    past = await db.create_booking(555, "consultation", CONSULT, "2020-01-01", "09:00")
+    await rem._send_due(fake)
+    check("o'tgan navbatga eslatma yuborilmaydi",
+          not any(str(past) in t for _, t in sent), str(sent))
+
+    # 6) Bekor qilingan navbatga eslatma yo'q
+    sent.clear()
+    cancelled = await make(timedelta(hours=10))
+    await db.cancel_booking(cancelled)
+    await rem._send_due(fake)
+    check("bekor qilingan navbatga eslatma yo'q", not sent, str(sent))
+
+    # 7) Sozlamalar orqali o'chirish
+    await fresh_db()
+    await db.save_user(555, "Ali", None, "+998901112233")
+    await db.set_reminder("day_before", False)
+    await db.set_reminder("hours_before", 0)
+    sent.clear()
+    await make(timedelta(hours=2))
+    count = await rem._send_due(fake)
+    check("ikkalasi o'chirilganda hech narsa yuborilmaydi", count == 0 and not sent, str(sent))
+
+    # 8) Faqat soatlik yoqilgan
+    await db.set_reminder("hours_before", 3)
+    sent.clear()
+    await rem._send_due(fake)
+    check("faqat soatlik yoqilganda u ishlaydi", any("soatdan keyin" in t for _, t in sent), str(sent))
+    check("kunlik yuborilmadi", not any("ertaga" in t.lower() for _, t in sent))
 
 
 async def test_settings_storage() -> None:
@@ -597,8 +793,10 @@ async def main() -> None:
     print("=" * 62)
 
     for test in (
-        test_utils, test_admin_ids_parsing, test_backup_config, test_time_parsing,
-        test_settings_storage, test_settings_persistence_and_reset, test_callbacks, test_password, test_admins,
+        test_utils, test_admin_ids_parsing, test_backup_config, test_backup_encryption,
+        test_backup_restore_logic, test_time_parsing,
+        test_reminders, test_settings_storage, test_settings_persistence_and_reset,
+        test_callbacks, test_password, test_admins,
         test_users_and_booking, test_ownership, test_race_condition,
         test_persistence, test_corrupted_file, test_purge, test_stats,
         test_keyboards,

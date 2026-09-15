@@ -250,6 +250,7 @@ def settings_menu() -> InlineKeyboardMarkup:
     kb.button(text="🏥 Bo'limlar va soatlar", callback_data=AdminCB(action="depts"))
     kb.button(text="📅 Navbat qoidalari", callback_data=AdminCB(action="rules"))
     kb.button(text="📍 Klinika ma'lumotlari", callback_data=AdminCB(action="clinic"))
+    kb.button(text="🔔 Eslatmalar", callback_data=AdminCB(action="reminders"))
     kb.button(text="♻️ Standart holatga qaytarish", callback_data=AdminSetCB(action="reset_ask"))
     kb.button(text="⬅️ Admin menyusi", callback_data=AdminCB(action="menu"))
     kb.adjust(1)
@@ -323,6 +324,22 @@ def rules_menu() -> InlineKeyboardMarkup:
             for i in range(start, min(start + 4, 7))
         ])
 
+    kb.row(InlineKeyboardButton(text="⬅️ Sozlamalar", callback_data=AdminCB(action="settings").pack()))
+    return kb.as_markup()
+
+
+def reminders_menu() -> InlineKeyboardMarkup:
+    """Bemorga avtomatik eslatmalar."""
+    r = db.reminders()
+    hours = int(r.get("hours_before") or 0)
+
+    kb = InlineKeyboardBuilder()
+    kb.row(InlineKeyboardButton(
+        text=f"{'🟢' if r.get('day_before') else '🔴'} Kun oldin eslatish",
+        callback_data=AdminSetCB(action="rem_day").pack()))
+    kb.row(InlineKeyboardButton(
+        text=f"⏰ Soat oldin: {hours if hours else 'o‘chiq'}",
+        callback_data=AdminSetCB(action="rem_hours").pack()))
     kb.row(InlineKeyboardButton(text="⬅️ Sozlamalar", callback_data=AdminCB(action="settings").pack()))
     return kb.as_markup()
 

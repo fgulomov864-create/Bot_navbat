@@ -6,13 +6,14 @@ TARTIB MUHIM: aiogram routerlarni shu ketma-ketlikda tekshiradi.
 
 from aiogram import Router
 
-from handlers import admin, booking, common, fallback
+from handlers import admin, booking, common, fallback, settings
 
 
 def setup_routers() -> Router:
     root = Router(name="root")
     root.include_router(common.router)
     root.include_router(admin.router)
+    root.include_router(settings.router)
     root.include_router(booking.router)
     root.include_router(fallback.router)
     return root

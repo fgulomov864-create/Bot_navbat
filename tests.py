@@ -155,6 +155,136 @@ async def test_backup_config() -> None:
           GitHubBackup._digest(b"a") != GitHubBackup._digest(b"b"))
 
 
+async def test_settings_storage() -> None:
+    print("\n📦 Sozlamalar (bo'limlar, qoidalar, klinika)")
+    await fresh_db()
+
+    # Boshlang'ich qiymatlar config.py dan ko'chiriladi
+    check("2 ta standart bo'lim", len(db.departments()) == 2, str(list(db.departments())))
+    check("treatment kaliti bor", db.department("treatment") is not None)
+    check("bo'lim nomi", db.dept_name("treatment") == TREAT, db.dept_name("treatment"))
+    check("bo'lim soatlari", db.dept_times("treatment")[0] == "09:00")
+    check("qoidalar o'rnatildi", db.rule("booking_days_ahead") == 7)
+    check("dam olish kuni", db.rule("weekend_days") == [6])
+    check("klinika manzili bor", bool(db.clinic().get("address")))
+
+    # Qoidalarni o'zgartirish
+    await db.set_rule("booking_days_ahead", 14)
+    await db.set_rule("max_active_bookings", 5)
+    await db.set_rule("weekend_days", [5, 6])
+    check("oldindan kunlar o'zgardi", db.rule("booking_days_ahead") == 14)
+    check("limit o'zgardi", db.rule("max_active_bookings") == 5)
+    check("dam olish kunlari o'zgardi", db.rule("weekend_days") == [5, 6])
+
+    # Klinika
+    await db.set_clinic("address", "Chilonzor 5-mavze, 12-uy")
+    await db.set_clinic("map_link", "https://maps.example/xyz")
+    check("manzil saqlandi", db.clinic()["address"] == "Chilonzor 5-mavze, 12-uy")
+    check("havola saqlandi", db.clinic()["map_link"] == "https://maps.example/xyz")
+
+    # Bo'lim nomi va soatlari
+    check("nom o'zgartirildi", await db.update_department("treatment", name="🦷 Terapiya"))
+    check("yangi nom o'qildi", db.dept_name("treatment") == "🦷 Terapiya")
+    check("soatlar o'zgartirildi", await db.update_department("treatment", times=["08:00", "09:00"]))
+    check("yangi soatlar", db.dept_times("treatment") == ["08:00", "09:00"])
+    check("mavjud bo'lmagan bo'lim False", not await db.update_department("yoq", name="X"))
+
+    # Yangi bo'lim
+    key = await db.add_department("🦷 Implantatsiya", ["10:00", "11:00", "12:00"])
+    check("yangi bo'lim qo'shildi", key in db.departments(), key)
+    check("yangi bo'lim kaliti qisqa", len(key) <= 5, key)
+    check("yangi bo'lim nomi", db.dept_name(key) == "🦷 Implantatsiya")
+    check("endi 3 ta bo'lim", len(db.departments()) == 3)
+    check("yangi bo'lim oxirida", list(db.departments())[-1] == key, str(list(db.departments())))
+
+    key2 = await db.add_department("🦷 Ortodontiya", ["09:00"])
+    check("ikkinchi yangi bo'lim boshqa kalit oldi", key2 != key, f"{key} vs {key2}")
+
+    # callback_data 64 bayt limitiga sig'ishi kerak
+    from callbacks import SlotCB
+    packed = SlotCB(key=key2, date="2099-06-10", time="09:00").pack()
+    check(f"yangi bo'lim callback'i sig'adi ({len(packed.encode())} bayt)", len(packed.encode()) <= 64)
+
+    # Tartibni o'zgartirish
+    keys = list(db.departments())
+    await db.update_department_order(keys[-1], -1)
+    check("tartib o'zgardi", list(db.departments())[0] == keys[-1], str(list(db.departments())))
+
+    # O'chirish
+    check("bo'lim o'chirildi", await db.delete_department(key2))
+    check("o'chirilgan bo'lim yo'q", db.department(key2) is None)
+    check("o'chirilgan bo'lim nomi xavfsiz qaytadi", isinstance(db.dept_name(key2), str))
+    check("mavjud bo'lmaganni o'chirish False", not await db.delete_department("yoq"))
+
+    # Oxirgi bo'limni o'chirib bo'lmaydi
+    for k in list(db.departments())[:-1]:
+        await db.delete_department(k)
+    check("faqat 1 ta bo'lim qoldi", len(db.departments()) == 1)
+    check("OXIRGI bo'limni o'chirib BO'LMAYDI",
+          not await db.delete_department(list(db.departments())[0]))
+
+    # Faol navbatlar hisobi
+    await fresh_db()
+    await db.save_user(555, "Ali", None, "+998901112233")
+    await db.create_booking(555, "treatment", TREAT, FUTURE, "09:00")
+    check("bo'limdagi faol navbat sanaldi", db.active_bookings_in_department("treatment") == 1)
+    check("boshqa bo'limda 0", db.active_bookings_in_department("consultation") == 0)
+
+
+async def test_settings_persistence_and_reset() -> None:
+    print("\n📦 Sozlamalar: saqlanishi va tiklash")
+    await fresh_db()
+
+    await db.set_rule("booking_days_ahead", 21)
+    await db.set_clinic("address", "Yangi manzil")
+    new_key = await db.add_department("🦷 Test bo'lim", ["07:00", "08:00"])
+    await db.change_admin_password("maxfiy-parol")
+    await db.save_user(555, "Ali", None, "+998901112233")
+    await db.close()
+
+    # Botni "qayta ishga tushirish"
+    await db.connect()
+    check("qoida saqlanib qoldi", db.rule("booking_days_ahead") == 21)
+    check("manzil saqlanib qoldi", db.clinic()["address"] == "Yangi manzil")
+    check("yangi bo'lim saqlanib qoldi", db.department(new_key) is not None)
+    check("bo'lim soatlari saqlanib qoldi", db.dept_times(new_key) == ["07:00", "08:00"])
+    check("standart bo'limlar ustiga yozilmadi", db.rule("booking_days_ahead") != 7)
+
+    # Standart holatga qaytarish
+    await db.reset_settings()
+    check("qoidalar tiklandi", db.rule("booking_days_ahead") == 7)
+    check("manzil tiklandi", db.clinic()["address"] != "Yangi manzil")
+    check("qo'shilgan bo'lim o'chdi", db.department(new_key) is None)
+    check("standart bo'limlar qaytdi", len(db.departments()) == 2)
+    check("PAROL tegilmadi", await db.verify_admin_password("maxfiy-parol"))
+    check("BEMOR tegilmadi", await db.is_registered(555))
+
+
+async def test_time_parsing() -> None:
+    print("\n📦 Soatlarni o'qish (admin kiritadi)")
+    from utils import parse_times
+
+    cases = {
+        "09:00, 10:30, 12:00": ["09:00", "10:30", "12:00"],
+        "09:00 10:30 12:00": ["09:00", "10:30", "12:00"],
+        "9:00,10:30": ["09:00", "10:30"],          # bir xonali soat to'ldiriladi
+        "12:00, 09:00": ["09:00", "12:00"],        # tartiblanadi
+        "09:00, 09:00, 10:00": ["09:00", "10:00"], # takror olib tashlanadi
+        "09:00\n10:30": ["09:00", "10:30"],
+        "23:59": ["23:59"],
+        "00:00": ["00:00"],
+        "24:00": None,   # noto'g'ri soat
+        "09:60": None,   # noto'g'ri daqiqa
+        "0900": None,
+        "salom": None,
+        "": None,
+        "09:00, salom": None,
+    }
+    for raw, expected in cases.items():
+        got = parse_times(raw)
+        check(f"soatlar {raw!r:22} -> {expected}", got == expected, f"olindi: {got}")
+
+
 async def test_callbacks() -> None:
     print("\n📦 Callback data (64 bayt limiti va ':' muammosi)")
 
@@ -467,7 +597,8 @@ async def main() -> None:
     print("=" * 62)
 
     for test in (
-        test_utils, test_admin_ids_parsing, test_backup_config, test_callbacks, test_password, test_admins,
+        test_utils, test_admin_ids_parsing, test_backup_config, test_time_parsing,
+        test_settings_storage, test_settings_persistence_and_reset, test_callbacks, test_password, test_admins,
         test_users_and_booking, test_ownership, test_race_condition,
         test_persistence, test_corrupted_file, test_purge, test_stats,
         test_keyboards,

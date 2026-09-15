@@ -12,7 +12,6 @@ from aiogram.types import CallbackQuery, Message
 import storage as db
 import keyboards as kb
 from callbacks import NavCB
-from config import CLINIC_ADDRESS, MAP_LINK
 from utils import esc
 
 log = logging.getLogger(__name__)
@@ -134,10 +133,13 @@ async def on_manual_phone(message: Message, state: FSMContext) -> None:
 
 @router.message(F.text == kb.BTN_LOCATION)
 async def on_location(message: Message) -> None:
+    # Manzil va havola admin panelidan o'zgartiriladi (⚙️ Sozlamalar)
+    clinic = db.clinic()
+    link = esc(clinic.get("map_link") or "")
     await message.answer(
         f"📍 <b>Bizning manzilimiz</b>\n\n"
-        f"{esc(CLINIC_ADDRESS)}\n\n"
-        f'🔗 <a href="{MAP_LINK}">Google Maps orqali ochish</a>',
+        f"{esc(clinic.get('address'))}\n\n"
+        f'🔗 <a href="{link}">Google Maps orqali ochish</a>',
         disable_web_page_preview=False,
     )
 

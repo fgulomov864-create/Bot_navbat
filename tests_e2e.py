@@ -34,7 +34,16 @@ from aiogram.types import CallbackQuery, Chat, Contact, Message, Update, User  #
 
 import config  # noqa: E402
 import storage as db  # noqa: E402
-from callbacks import AdminCB, AdminUserCB, DateCB, DeptCB, SlotCB, UserBookingCB  # noqa: E402
+from callbacks import (  # noqa: E402
+    AdminCB,
+    AdminDeptCB,
+    AdminSetCB,
+    AdminUserCB,
+    DateCB,
+    DeptCB,
+    SlotCB,
+    UserBookingCB,
+)
 from handlers import setup_routers  # noqa: E402
 from handlers.errors import on_error  # noqa: E402
 from keyboards import BTN_ADMIN, BTN_BOOK, BTN_CANCEL, BTN_MY  # noqa: E402
@@ -43,6 +52,7 @@ PASSED: list[str] = []
 FAILED: list[str] = []
 
 FUTURE = "2099-06-10"
+OTHER_DAY = "2099-06-11"
 
 
 def check(name: str, condition: bool, detail: str = "") -> None:
@@ -514,6 +524,145 @@ async def test_menu_visibility() -> None:
     await bot.session.close()
 
 
+async def test_settings_panel() -> None:
+    print("\n📦 ⚙️ Sozlamalarni panel orqali o'zgartirish")
+    bot, dp, s = await build()
+    await db.add_admin(100, "Super", None)
+    await db.add_admin(200, "Oddiy", None, added_by=100)
+
+    # Oddiy admin sozlamalarga umuman kira olmaydi
+    for action in ("settings", "depts", "rules", "clinic"):
+        s.reset()
+        await dp.feed_update(bot, callback_update(200, AdminCB(action=action).pack()))
+        check(f"oddiy admin '{action}' ga kira olmadi", s.said("faqat super admin"), str(s.alerts()))
+
+    # --- Bo'lim nomini o'zgartirish ---
+    s.reset()
+    await dp.feed_update(bot, callback_update(100, AdminCB(action="depts").pack()))
+    check("bo'limlar ro'yxati ko'rindi", s.said("Bo'limlar va ish soatlari"))
+    check("standart bo'lim ko'rindi", s.said("Davolash"))
+
+    s.reset()
+    await dp.feed_update(bot, callback_update(100, AdminDeptCB(action="rename", key="treatment").pack()))
+    check("yangi nom so'raldi", s.said("nomini o'zgartirish"))
+
+    s.reset()
+    await dp.feed_update(bot, text_update(100, "🦷 Terapevtik davolash"))
+    check("bo'lim nomi o'zgartirildi", db.dept_name("treatment") == "🦷 Terapevtik davolash",
+          db.dept_name("treatment"))
+    check("tasdiq xabari berildi", s.said("nomi o'zgartirildi"))
+
+    # Bemor darhol yangi nomni ko'radi
+    s.reset()
+    await db.save_user(555, "Bemor", None, "+998901112233")
+    await dp.feed_update(bot, text_update(555, BTN_BOOK))
+    check("BEMOR yangi nomni darhol ko'rdi",
+          any("Terapevtik" in b.text
+              for c in s.calls if getattr(c, "reply_markup", None) is not None
+              and getattr(c.reply_markup, "inline_keyboard", None)
+              for row in c.reply_markup.inline_keyboard for b in row))
+
+    # --- Ish soatlarini o'zgartirish ---
+    s.reset()
+    await dp.feed_update(bot, callback_update(100, AdminDeptCB(action="times", key="treatment").pack()))
+    check("soatlar so'raldi", s.said("ish soatlari"))
+
+    s.reset()
+    await dp.feed_update(bot, text_update(100, "notogri"))
+    check("noto'g'ri soat rad etildi", s.said("tushunmadim"))
+    check("soatlar o'zgarmadi", db.dept_times("treatment") != [])
+
+    s.reset()
+    await dp.feed_update(bot, text_update(100, "08:00, 09:30, 11:00"))
+    check("soatlar o'zgartirildi", db.dept_times("treatment") == ["08:00", "09:30", "11:00"],
+          str(db.dept_times("treatment")))
+    check("tasdiq berildi", s.said("soatlari yangilandi"))
+
+    # --- Yangi bo'lim qo'shish ---
+    s.reset()
+    await dp.feed_update(bot, callback_update(100, AdminDeptCB(action="add").pack()))
+    check("yangi bo'lim nomi so'raldi", s.said("Bo'lim nomini yuboring"))
+
+    s.reset()
+    await dp.feed_update(bot, text_update(100, "🦷 Implantatsiya"))
+    check("endi soatlar so'raldi", s.said("ish soatlarini"))
+
+    s.reset()
+    await dp.feed_update(bot, text_update(100, "10:00, 14:00"))
+    check("yangi bo'lim qo'shildi", len(db.departments()) == 3, str(list(db.departments())))
+    new_key = [k for k, v in db.departments().items() if v["name"] == "🦷 Implantatsiya"]
+    check("yangi bo'lim nomi to'g'ri", len(new_key) == 1)
+    check("yangi bo'lim soatlari", db.dept_times(new_key[0]) == ["10:00", "14:00"])
+
+    # Bemor yangi bo'limga darhol yozila oladi
+    s.reset()
+    await dp.feed_update(bot, callback_update(555, DeptCB(key=new_key[0]).pack()))
+    check("bemor yangi bo'limga kira oldi", s.said("Qaysi kunga"), s.last_text()[:60])
+
+    # --- Navbat qoidalari ---
+    s.reset()
+    await dp.feed_update(bot, callback_update(100, AdminCB(action="rules").pack()))
+    check("qoidalar menyusi ko'rindi", s.said("Navbat qoidalari"))
+
+    s.reset()
+    await dp.feed_update(bot, callback_update(100, AdminSetCB(action="max").pack()))
+    await dp.feed_update(bot, text_update(100, "999"))
+    check("chegaradan tashqari qiymat rad etildi", s.said("oralig'ida bo'lsin"))
+    check("qoida o'zgarmadi", db.rule("max_active_bookings") != 999)
+
+    s.reset()
+    await dp.feed_update(bot, text_update(100, "1"))
+    check("qoida o'zgartirildi", db.rule("max_active_bookings") == 1)
+
+    # Limit darhol kuchga kirdi: bemorda 1 ta navbat bor, BOSHQA kunga ham ololmaydi
+    await db.create_booking(555, "treatment", "🦷 Terapevtik davolash", FUTURE, "08:00")
+    s.reset()
+    await dp.feed_update(bot, callback_update(555, SlotCB(key=new_key[0], date=OTHER_DAY, time="10:00").pack()))
+    check("yangi LIMIT darhol ishladi", s.said("faol navbat bor"), str(s.alerts()))
+    check("navbat yaratilmadi", await db.count_active_bookings(555) == 1)
+
+    # --- Dam olish kunlari ---
+    s.reset()
+    before = set(db.rule("weekend_days"))
+    await dp.feed_update(bot, callback_update(100, AdminSetCB(action="weekday", value=5).pack()))
+    check("shanba dam olish kuniga aylandi", 5 in set(db.rule("weekend_days")), str(db.rule("weekend_days")))
+    await dp.feed_update(bot, callback_update(100, AdminSetCB(action="weekday", value=5).pack()))
+    check("qayta bosilganda ish kuniga qaytdi", set(db.rule("weekend_days")) == before)
+
+    # --- Klinika ma'lumotlari ---
+    s.reset()
+    await dp.feed_update(bot, callback_update(100, AdminSetCB(action="address").pack()))
+    await dp.feed_update(bot, text_update(100, "Chilonzor 5-mavze, 12-uy"))
+    check("manzil o'zgartirildi", db.clinic()["address"] == "Chilonzor 5-mavze, 12-uy")
+
+    s.reset()
+    await dp.feed_update(bot, callback_update(100, AdminSetCB(action="maplink").pack()))
+    await dp.feed_update(bot, text_update(100, "shunchaki matn"))
+    check("https siz havola rad etildi", s.said("https"))
+    await dp.feed_update(bot, text_update(100, "https://maps.example/klinika"))
+    check("havola o'zgartirildi", db.clinic()["map_link"] == "https://maps.example/klinika")
+
+    # Bemor yangi manzilni ko'radi
+    s.reset()
+    await dp.feed_update(bot, text_update(555, "📍 Manzil / Lokatsiya"))
+    check("BEMOR yangi manzilni ko'rdi", s.said("Chilonzor"), s.last_text()[:100])
+    check("BEMOR yangi havolani ko'rdi", s.said("maps.example/klinika"))
+
+    # --- Standart holatga qaytarish ---
+    s.reset()
+    await dp.feed_update(bot, callback_update(100, AdminSetCB(action="reset_ask").pack()))
+    check("tasdiqlash so'raldi", s.said("standart holatga qaytarasizmi"))
+
+    await dp.feed_update(bot, callback_update(100, AdminSetCB(action="reset_yes").pack()))
+    check("bo'limlar tiklandi", len(db.departments()) == 2, str(list(db.departments())))
+    check("nom tiklandi", db.dept_name("treatment") == "🦷 Davolash bo'limi")
+    check("qoida tiklandi", db.rule("max_active_bookings") == 3)
+    check("manzil tiklandi", db.clinic()["address"] != "Chilonzor 5-mavze, 12-uy")
+    check("BEMOR tegilmadi", await db.is_registered(555))
+
+    await bot.session.close()
+
+
 async def test_password_change() -> None:
     print("\n📦 Parolni o'zgartirish (faqat super admin)")
     bot, dp, s = await build()
@@ -656,7 +805,7 @@ async def main() -> None:
     for test in (
         test_registration, test_booking_flow, test_cancel_ownership,
         test_admin_login, test_admin_bruteforce, test_admin_management,
-        test_menu_visibility,
+        test_menu_visibility, test_settings_panel,
         test_password_change, test_admin_queue, test_notifications,
         test_fallback_and_errors,
     ):

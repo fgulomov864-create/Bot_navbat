@@ -10,8 +10,20 @@ from aiogram.types import (
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from callbacks import AdminCB, AdminQueueCB, AdminUserCB, DateCB, DeptCB, NavCB, SlotCB, UserBookingCB
-from config import ADMIN_PAGE_SIZE, BOOKING_DAYS_AHEAD, DEPARTMENTS, WEEKEND_DAYS
+from callbacks import (
+    AdminCB,
+    AdminDeptCB,
+    AdminQueueCB,
+    AdminSetCB,
+    AdminUserCB,
+    DateCB,
+    DeptCB,
+    NavCB,
+    SlotCB,
+    UserBookingCB,
+)
+import storage as db
+from config import ADMIN_PAGE_SIZE, LIMITS, WEEKDAYS_UZ
 from utils import is_slot_bookable, now, to_date, weekday_name
 
 BTN_BOOK = "📅 Navbat olish"
@@ -54,8 +66,9 @@ def phone_request() -> ReplyKeyboardMarkup:
 # --------------------------------------------------------------------------
 
 def departments() -> InlineKeyboardMarkup:
+    """Bo'limlar sozlamalardan o'qiladi — admin panelda o'zgartirsa darhol aks etadi."""
     kb = InlineKeyboardBuilder()
-    for key, info in DEPARTMENTS.items():
+    for key, info in db.departments().items():
         kb.button(text=info["name"], callback_data=DeptCB(key=key))
     kb.adjust(1)
     return kb.as_markup()
@@ -67,16 +80,19 @@ def days(dept_key: str) -> InlineKeyboardMarkup:
     Bugungi kun faqat hali bo'sh soat qolgan bo'lsa ko'rsatiladi.
     """
     kb = InlineKeyboardBuilder()
-    times = DEPARTMENTS.get(dept_key, {}).get("times", [])
+    times = db.dept_times(dept_key)
     today = now().date()
+    days_ahead = db.rule("booking_days_ahead")
+    weekend = set(db.rule("weekend_days") or [])
+    lead = db.rule("min_lead_minutes")
 
-    for offset in range(BOOKING_DAYS_AHEAD + 1):
+    for offset in range(days_ahead + 1):
         day = today + timedelta(days=offset)
-        if day.weekday() in WEEKEND_DAYS:
+        if day.weekday() in weekend:
             continue
 
         date_str = day.strftime("%Y-%m-%d")
-        if offset == 0 and not any(is_slot_bookable(date_str, t) for t in times):
+        if offset == 0 and not any(is_slot_bookable(date_str, t, lead) for t in times):
             continue  # bugun hamma soat o'tib ketgan
 
         prefix = "📅 Bugun" if offset == 0 else "📅 Ertaga" if offset == 1 else f"📅 {weekday_name(day)}"
@@ -90,10 +106,11 @@ def days(dept_key: str) -> InlineKeyboardMarkup:
 def slots(dept_key: str, date_str: str, booked: set[str]) -> InlineKeyboardMarkup:
     """Soatlar: 🟢 bo'sh, ❌ band, ⌛ o'tib ketgan."""
     kb = InlineKeyboardBuilder()
-    for time_str in DEPARTMENTS.get(dept_key, {}).get("times", []):
+    lead = db.rule("min_lead_minutes")
+    for time_str in db.dept_times(dept_key):
         if time_str in booked:
             kb.button(text=f"❌ {time_str}", callback_data=NavCB(to="busy"))
-        elif not is_slot_bookable(date_str, time_str):
+        elif not is_slot_bookable(date_str, time_str, lead):
             kb.button(text=f"⌛ {time_str}", callback_data=NavCB(to="past"))
         else:
             kb.button(text=f"🟢 {time_str}", callback_data=SlotCB(key=dept_key, date=date_str, time=time_str))
@@ -138,10 +155,11 @@ def admin_menu(is_super: bool) -> InlineKeyboardMarkup:
     kb.button(text="📊 Statistika", callback_data=AdminCB(action="stats"))
 
     if is_super:
+        kb.button(text="⚙️ Sozlamalar", callback_data=AdminCB(action="settings"))
         kb.button(text="👥 Adminlar ro'yxati", callback_data=AdminCB(action="admins"))
         kb.button(text="🔑 Parolni o'zgartirish", callback_data=AdminCB(action="passwd"))
         kb.button(text="💾 Hozir zaxiralash", callback_data=AdminCB(action="backup"))
-        kb.adjust(2, 2, 1)
+        kb.adjust(2, 2, 2)
     else:
         # Super admin o'zini chiqara olmaydi, shuning uchun unga bu tugma ham kerak emas
         kb.button(text="🚪 Adminlikdan chiqish", callback_data=AdminCB(action="logout"))
@@ -220,4 +238,107 @@ def cancel_input() -> InlineKeyboardMarkup:
     """Parol kiritish jarayonini bekor qilish."""
     kb = InlineKeyboardBuilder()
     kb.button(text="🔙 Bekor qilish", callback_data=NavCB(to="close"))
+    return kb.as_markup()
+
+
+# --------------------------------------------------------------------------
+# ⚙️ Sozlamalar (faqat super admin)
+# --------------------------------------------------------------------------
+
+def settings_menu() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🏥 Bo'limlar va soatlar", callback_data=AdminCB(action="depts"))
+    kb.button(text="📅 Navbat qoidalari", callback_data=AdminCB(action="rules"))
+    kb.button(text="📍 Klinika ma'lumotlari", callback_data=AdminCB(action="clinic"))
+    kb.button(text="♻️ Standart holatga qaytarish", callback_data=AdminSetCB(action="reset_ask"))
+    kb.button(text="⬅️ Admin menyusi", callback_data=AdminCB(action="menu"))
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def back_to_settings() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="⬅️ Sozlamalar", callback_data=AdminCB(action="settings"))
+    return kb.as_markup()
+
+
+def departments_admin() -> InlineKeyboardMarkup:
+    """Bo'limlar ro'yxati — har biri tahrirlash uchun bosiladi."""
+    kb = InlineKeyboardBuilder()
+    depts = db.departments()
+
+    for key, info in depts.items():
+        kb.row(InlineKeyboardButton(
+            text=f"{info['name']} ({len(info['times'])} soat)",
+            callback_data=AdminDeptCB(action="open", key=key).pack(),
+        ))
+
+    if len(depts) < LIMITS["max_departments"]:
+        kb.row(InlineKeyboardButton(text="➕ Yangi bo'lim", callback_data=AdminDeptCB(action="add").pack()))
+    kb.row(InlineKeyboardButton(text="⬅️ Sozlamalar", callback_data=AdminCB(action="settings").pack()))
+    return kb.as_markup()
+
+
+def department_edit(key: str, can_delete: bool) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✏️ Nomini o'zgartirish", callback_data=AdminDeptCB(action="rename", key=key))
+    kb.button(text="⏰ Soatlarini o'zgartirish", callback_data=AdminDeptCB(action="times", key=key))
+    kb.button(text="🔼 Yuqoriga", callback_data=AdminDeptCB(action="up", key=key))
+    kb.button(text="🔽 Pastga", callback_data=AdminDeptCB(action="down", key=key))
+    if can_delete:
+        kb.button(text="🗑 Bo'limni o'chirish", callback_data=AdminDeptCB(action="del_ask", key=key))
+    kb.button(text="⬅️ Bo'limlar", callback_data=AdminCB(action="depts"))
+    kb.adjust(1, 1, 2, 1, 1)
+    return kb.as_markup()
+
+
+def confirm_dept_delete(key: str) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✅ Ha, o'chirilsin", callback_data=AdminDeptCB(action="del_yes", key=key))
+    kb.button(text="🔙 Yo'q", callback_data=AdminDeptCB(action="open", key=key))
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def rules_menu() -> InlineKeyboardMarkup:
+    """Navbat qoidalari + dam olish kunlarini bir bosishda yoqish/o'chirish."""
+    kb = InlineKeyboardBuilder()
+    kb.row(InlineKeyboardButton(
+        text=f"📆 Oldindan: {db.rule('booking_days_ahead')} kun",
+        callback_data=AdminSetCB(action="days").pack()))
+    kb.row(InlineKeyboardButton(
+        text=f"🔢 Bemorga limit: {db.rule('max_active_bookings')} ta",
+        callback_data=AdminSetCB(action="max").pack()))
+    kb.row(InlineKeyboardButton(
+        text=f"⏱ Minimal vaqt: {db.rule('min_lead_minutes')} daqiqa",
+        callback_data=AdminSetCB(action="lead").pack()))
+
+    weekend = set(db.rule("weekend_days") or [])
+    for start in (0, 4):
+        kb.row(*[
+            InlineKeyboardButton(
+                text=f"{'🔴' if i in weekend else '🟢'} {WEEKDAYS_UZ[i][:3]}",
+                callback_data=AdminSetCB(action="weekday", value=i).pack(),
+            )
+            for i in range(start, min(start + 4, 7))
+        ])
+
+    kb.row(InlineKeyboardButton(text="⬅️ Sozlamalar", callback_data=AdminCB(action="settings").pack()))
+    return kb.as_markup()
+
+
+def clinic_menu() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✏️ Manzilni o'zgartirish", callback_data=AdminSetCB(action="address"))
+    kb.button(text="🗺 Xarita havolasini o'zgartirish", callback_data=AdminSetCB(action="maplink"))
+    kb.button(text="⬅️ Sozlamalar", callback_data=AdminCB(action="settings"))
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def confirm_reset() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✅ Ha, standart holatga qaytar", callback_data=AdminSetCB(action="reset_yes"))
+    kb.button(text="🔙 Yo'q", callback_data=AdminCB(action="settings"))
+    kb.adjust(1)
     return kb.as_markup()

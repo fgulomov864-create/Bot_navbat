@@ -33,6 +33,7 @@ Panelga **parol** bilan kiriladi. Boshlang'ich parol: `1234567890`.
 | 📋 Navbatlar | hamma admin | Sahifalangan ro'yxat: 🚨 chaqirish · ✅ keldi · 🚫 kelmadi · ❌ bekor qilish |
 | 📊 Statistika | hamma admin | Bemorlar, bugungi/kutilayotgan navbatlar, haftalik hisobot |
 | 🚪 Adminlikdan chiqish | **faqat oddiy admin** | O'z admin huquqidan voz kechish |
+| ⚙️ Sozlamalar | **faqat super admin** | Bo'limlar, ish soatlari, qoidalar, manzil |
 | 👥 Adminlar ro'yxati | **faqat super admin** | Kim admin, ID, daraja, sana + ❌ ro'yxatdan chiqarish |
 | 🔑 Parolni o'zgartirish | **faqat super admin** | Yangi parol; barcha adminlarga xabar boradi |
 | 💾 Hozir zaxiralash | **faqat super admin** | data.json ni darhol GitHub'ga yuklaydi |
@@ -40,6 +41,24 @@ Panelga **parol** bilan kiriladi. Boshlang'ich parol: `1234567890`.
 > Oddiy adminda super admin tugmalari **umuman chizilmaydi**. Tugma yo'q bo'lsa ham
 > callback'ni qo'lda yuborish mumkin, shuning uchun har bir amal **serverda ham**
 > qayta tekshiriladi.
+
+### ⚙️ Sozlamalar — hammasi paneldan o'zgartiriladi
+
+Ish soatlarini yoki manzilni o'zgartirish uchun **kodga tegish va qayta deploy
+qilish kerak emas**. Super admin panelda o'zgartiradi — bemorlar darhol ko'radi.
+
+| Bo'lim | Nimani o'zgartirish mumkin |
+|---|---|
+| 🏥 Bo'limlar va soatlar | Bo'lim qo'shish/o'chirish, nomini va ish soatlarini o'zgartirish, tartibini almashtirish |
+| 📅 Navbat qoidalari | Necha kun oldindan yozilish · bemorga navbat limiti · qabulgacha minimal vaqt · dam olish kunlari |
+| 📍 Klinika ma'lumotlari | Manzil matni va Google Maps havolasi |
+| ♻️ Standart holatga qaytarish | Sozlamalarni boshlang'ich holatga qaytaradi (bemorlar, navbatlar, adminlar va parol **tegilmaydi**) |
+
+Soatlar oddiy matn bilan kiritiladi — `09:00, 10:30, 12:00`. Bot `9:00` ni ham
+tushunadi, takrorlarni olib tashlaydi va tartiblaydi. Noto'g'ri qiymat saqlanmaydi.
+
+`config.py` dagi `DEFAULT_*` qiymatlari faqat **birinchi ishga tushishda** ishlatiladi —
+undan keyin manba `data.json` bo'ladi.
 
 **Xavfsizlik choralari:**
 - Parol bazada ochiq saqlanmaydi — `PBKDF2-SHA256`, 200 000 iteratsiya, tasodifiy salt.
@@ -170,10 +189,11 @@ handlers/
   common.py          /start, ro'yxatdan o'tish, manzil
   booking.py         Navbat olish / ko'rish / bekor qilish
   admin.py           Admin panel: parol, navbatlar, adminlar
+  settings.py        ⚙️ Sozlamalar: bo'limlar, soatlar, qoidalar, klinika
   fallback.py        Tushunilmagan xabarlar
   errors.py          Global xato ushlagich
-tests.py             Biznes-mantiq testlari (154 ta)
-tests_e2e.py         Uchidan-uchiga testlar (113 ta)
+tests.py             Biznes-mantiq testlari (212 ta)
+tests_e2e.py         Uchidan-uchiga testlar (153 ta)
 Dockerfile           Railway / har qanday konteyner uchun
 railway.json         Railway build va deploy sozlamalari
 ```
@@ -185,7 +205,12 @@ Hamma narsa bitta `data.json` faylida:
 ```jsonc
 {
   "version": 2,
-  "settings":     { "admin_password": "pbkdf2_sha256$200000$..." },
+  "settings": {
+    "admin_password": "pbkdf2_sha256$200000$...",
+    "departments": { "treatment": { "name": "🦷 Davolash bo'limi", "times": [...], "order": 0 } },
+    "rules":    { "booking_days_ahead": 7, "max_active_bookings": 3, "weekend_days": [6] },
+    "clinic":   { "address": "...", "map_link": "..." }
+  },
   "users":        { "7437501484": { "user_id": …, "full_name": …, "phone": … } },
   "admins":       { "637554472":  { "is_super": true, "added_by": null, … } },
   "appointments": [ { "id": 1, "service_key": "treatment", "status": "active", … } ],
@@ -207,8 +232,8 @@ Yozishda:
 ## Testlar
 
 ```bash
-python tests.py        # biznes-mantiq: 154 ta test
-python tests_e2e.py    # handlerlar: 113 ta test
+python tests.py        # biznes-mantiq: 212 ta test
+python tests_e2e.py    # handlerlar: 153 ta test
 ```
 
 E2E testlar Telegram'ga **ulanmaydi** — Bot sessiyasi soxta obyekt bilan
@@ -217,25 +242,23 @@ almashtirilgan, u yuborilgan xabarlarni ro'yxatga yig'adi.
 Testlar quyidagilarni tekshiradi: ro'yxatdan o'tish, navbat olish, bandlik,
 egalik tekshiruvi, admin parol oqimi, brute-force bloki, adminlarni boshqarish,
 **menyu ko'rinishi** (oddiy admin super admin bo'limlarini ko'rmasligi),
-`ADMIN_ID` ro'yxatini o'qish, 50 ta bir vaqtdagi bron urinishi,
-fayl buzilgandan keyin tiklanish, zaxira sozlamalari.
+`ADMIN_ID` ro'yxatini o'qish, **sozlamalarni panel orqali o'zgartirish**
+(bo'lim qo'shish, soatlarni tahrirlash, qoidalar darhol kuchga kirishi),
+50 ta bir vaqtdagi bron urinishi, fayl buzilgandan keyin tiklanish, zaxira sozlamalari.
 
 ---
 
 ## Sozlash
 
-Ish soatlari va bo'limlar — [config.py](config.py) dagi `DEPARTMENTS`:
+Kundalik sozlamalar (bo'limlar, ish soatlari, navbat qoidalari, manzil) —
+**admin panelidagi ⚙️ Sozlamalar** orqali, kodga tegmasdan.
 
-```python
-DEPARTMENTS = {
-    "treatment":    {"name": "🦷 Davolash bo'limi", "times": ["09:00", "10:30", …]},
-    "consultation": {"name": "👨‍⚕️ Maslahat olish",  "times": ["09:30", "11:00", …]},
-}
-```
+Kod darajasida qoladiganlar ([config.py](config.py)):
 
-Boshqa sozlamalar: `BOOKING_DAYS_AHEAD` (necha kun oldindan), `MAX_ACTIVE_BOOKINGS`
-(bir bemordagi navbat limiti), `MIN_LEAD_MINUTES` (qabulgacha minimal vaqt),
-`WEEKEND_DAYS` (dam olish kunlari), `ADMIN_PAGE_SIZE`.
+- `DEFAULT_DEPARTMENTS`, `DEFAULT_RULES`, `DEFAULT_CLINIC` — faqat **birinchi
+  ishga tushish** uchun boshlang'ich qiymatlar
+- `LIMITS` — panelda ruxsat etilgan chegaralar (masalan, oldindan yozilish 1–30 kun)
+- `ADMIN_PAGE_SIZE`, `PASSWORD_MIN_LENGTH`, `LOGIN_MAX_ATTEMPTS`, `LOGIN_BLOCK_MINUTES`
 
 ---
 

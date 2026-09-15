@@ -1,11 +1,13 @@
 """Umumiy yordamchi funksiyalar: vaqt zonasi, sana formatlash, HTML tozalash."""
 
 import html
+import re
 from datetime import date, datetime, timedelta
 
-from config import MIN_LEAD_MINUTES, TIMEZONE, WEEKDAYS_UZ
+from config import TIMEZONE, WEEKDAYS_UZ
 
 DATE_FMT = "%Y-%m-%d"
+TIME_RE = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
 
 
 def now() -> datetime:
@@ -27,9 +29,35 @@ def slot_datetime(date_str: str, time_str: str) -> datetime:
     return naive.replace(tzinfo=TIMEZONE)
 
 
-def is_slot_bookable(date_str: str, time_str: str) -> bool:
-    """Bu vaqtga hali navbat olish mumkinmi (o'tib ketmaganmi)."""
-    return slot_datetime(date_str, time_str) - timedelta(minutes=MIN_LEAD_MINUTES) > now()
+def is_slot_bookable(date_str: str, time_str: str, lead_minutes: int = 30) -> bool:
+    """Bu vaqtga hali navbat olish mumkinmi (o'tib ketmaganmi).
+
+    lead_minutes — qabulgacha kamida qancha vaqt qolishi kerak.
+    Qiymat sozlamalardan (storage.rule) uzatiladi, shuning uchun parametr —
+    aks holda utils <-> storage aylanma importi hosil bo'lardi.
+    """
+    return slot_datetime(date_str, time_str) - timedelta(minutes=lead_minutes) > now()
+
+
+def parse_times(raw: str) -> list[str] | None:
+    """Admin kiritgan soatlar matnini ro'yxatga aylantiradi.
+
+    '09:00, 10:30 12:00' yoki '9:00\\n10:30' -> ['09:00', '10:30', '12:00']
+    Bitta ham noto'g'ri soat bo'lsa None qaytaradi.
+    Takrorlar olib tashlanadi, natija tartiblanadi.
+    """
+    parts = [p.strip() for p in re.split(r"[,\s;]+", raw or "") if p.strip()]
+    if not parts:
+        return None
+
+    times: set[str] = set()
+    for part in parts:
+        match = TIME_RE.match(part)
+        if not match:
+            return None
+        times.add(f"{int(match.group(1)):02d}:{match.group(2)}")
+
+    return sorted(times)
 
 
 def weekday_name(d: date) -> str:

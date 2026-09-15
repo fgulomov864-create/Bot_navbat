@@ -69,8 +69,6 @@ TIMEZONE = ZoneInfo(os.getenv("TIMEZONE", "Asia/Tashkent"))
 # /data/data.json) o'zgarishsiz ishlatiladi.
 _raw_data_file = os.getenv("DATA_FILE") or "data.json"
 DATA_PATH = Path(_raw_data_file) if Path(_raw_data_file).is_absolute() else BASE_DIR / _raw_data_file
-MAP_LINK = os.getenv("MAP_LINK", "https://maps.app.goo.gl/Ay8YVsm44MMAWxst9?g_st=ac")
-CLINIC_ADDRESS = os.getenv("CLINIC_ADDRESS", "Stomatologiya klinikasi")
 
 # --- Admin paneliga kirish ---
 # Bu faqat BOSHLANG'ICH parol. Birinchi kirgan super admin uni panel orqali o'zgartiradi.
@@ -80,14 +78,18 @@ PASSWORD_MIN_LENGTH = 4
 LOGIN_MAX_ATTEMPTS = 5  # necha marta xato kiritgach bloklanadi
 LOGIN_BLOCK_MINUTES = 15  # blok muddati
 
-# --- Navbat qoidalari ---
-BOOKING_DAYS_AHEAD = 7  # necha kun oldindan navbat olish mumkin
-MAX_ACTIVE_BOOKINGS = 3  # bir foydalanuvchidagi faol navbatlar limiti
-MIN_LEAD_MINUTES = 30  # bugungi kunga: qabulgacha kamida shuncha daqiqa qolishi shart
-WEEKEND_DAYS = {6}  # 0=Dushanba ... 6=Yakshanba
+# --- Kod darajasidagi konstantalar (panel orqali o'zgartirilmaydi) ---
 ADMIN_PAGE_SIZE = 5  # admin panelida bir sahifadagi navbatlar soni
 
-DEPARTMENTS: dict[str, dict] = {
+# ==========================================================================
+# QUYIDAGILAR FAQAT BOSHLANG'ICH QIYMATLAR
+#
+# Bot birinchi marta ishga tushganda ular data.json ichiga ko'chiriladi va
+# undan keyin super admin ularni PANEL orqali o'zgartiradi (⚙️ Sozlamalar).
+# Ya'ni ish soatlarini yoki manzilni o'zgartirish uchun kodga tegish shart emas.
+# ==========================================================================
+
+DEFAULT_DEPARTMENTS: dict[str, dict] = {
     "treatment": {
         "name": "🦷 Davolash bo'limi",
         "times": ["09:00", "10:30", "12:00", "13:30", "15:00", "16:30", "18:00"],
@@ -96,6 +98,28 @@ DEPARTMENTS: dict[str, dict] = {
         "name": "👨‍⚕️ Maslahat olish",
         "times": ["09:30", "11:00", "12:30", "14:00", "15:30", "17:00", "18:30"],
     },
+}
+
+DEFAULT_RULES: dict[str, object] = {
+    "booking_days_ahead": 7,   # necha kun oldindan navbat olish mumkin
+    "max_active_bookings": 3,  # bir bemordagi faol navbatlar limiti
+    "min_lead_minutes": 30,    # bugungi kunga: qabulgacha kamida shuncha daqiqa
+    "weekend_days": [6],       # 0=Dushanba ... 6=Yakshanba
+}
+
+DEFAULT_CLINIC: dict[str, str] = {
+    "address": os.getenv("CLINIC_ADDRESS", "Stomatologiya klinikasi"),
+    "map_link": os.getenv("MAP_LINK", "https://maps.app.goo.gl/Ay8YVsm44MMAWxst9?g_st=ac"),
+}
+
+# Sozlamalar uchun chegaralar — panelda tekshiriladi
+LIMITS = {
+    "booking_days_ahead": (1, 30),
+    "max_active_bookings": (1, 20),
+    "min_lead_minutes": (0, 1440),
+    "dept_name_length": (2, 64),
+    "dept_times_count": (1, 24),
+    "max_departments": 12,
 }
 
 WEEKDAYS_UZ = ["Dushanba", "Seshanba", "Chorshanba", "Payshanba", "Juma", "Shanba", "Yakshanba"]
@@ -116,8 +140,3 @@ BACKUP_FILE = (os.getenv("BACKUP_FILE") or "backup/data.json").strip()
 BACKUP_INTERVAL_MINUTES = int(os.getenv("BACKUP_INTERVAL_MINUTES") or 5)
 
 BACKUP_ENABLED = bool(BACKUP_REPO and BACKUP_TOKEN)
-
-
-def dept_name(dept_key: str) -> str:
-    """Bo'lim kalitidan uning nomini qaytaradi (noma'lum kalit uchun ham xavfsiz)."""
-    return DEPARTMENTS.get(dept_key, {}).get("name", "🦷 Davolash bo'limi")

@@ -9,7 +9,6 @@ from aiogram.types import CallbackQuery, Message
 import storage as db
 import keyboards as kb
 from callbacks import DateCB, DeptCB, SlotCB, UserBookingCB
-from config import MAX_ACTIVE_BOOKINGS, dept_name
 from handlers.common import ask_phone
 from services import booking_card, notify_admins
 from utils import esc, is_slot_bookable, pretty_date
@@ -36,12 +35,12 @@ async def start_booking(message: Message, state: FSMContext) -> None:
 
 @router.callback_query(DeptCB.filter())
 async def choose_day(callback: CallbackQuery, callback_data: DeptCB) -> None:
-    if callback_data.key not in ("treatment", "consultation"):
+    if db.department(callback_data.key) is None:
         await callback.answer("Bo'lim topilmadi.", show_alert=True)
         return
 
     await callback.message.edit_text(
-        f"🏥 <b>Bo'lim:</b> {esc(dept_name(callback_data.key))}\n\n"
+        f"🏥 <b>Bo'lim:</b> {esc(db.dept_name(callback_data.key))}\n\n"
         f"Qaysi kunga navbat olmoqchisiz?",
         reply_markup=kb.days(callback_data.key),
     )
@@ -52,7 +51,7 @@ async def choose_day(callback: CallbackQuery, callback_data: DeptCB) -> None:
 async def choose_slot(callback: CallbackQuery, callback_data: DateCB) -> None:
     booked = await db.booked_times(callback_data.key, callback_data.date)
     await callback.message.edit_text(
-        f"🏥 <b>Bo'lim:</b> {esc(dept_name(callback_data.key))}\n"
+        f"🏥 <b>Bo'lim:</b> {esc(db.dept_name(callback_data.key))}\n"
         f"📅 <b>Kun:</b> {esc(pretty_date(callback_data.date))}\n\n"
         f"O'zingizga qulay soatni tanlang:\n"
         f"<i>🟢 bo'sh · ❌ band · ⌛ o'tib ketgan</i>",
@@ -70,7 +69,7 @@ async def take_slot(callback: CallbackQuery, callback_data: SlotCB, bot: Bot) ->
         await callback.answer("Avval /start bosib telefon raqamingizni yuboring.", show_alert=True)
         return
 
-    if not is_slot_bookable(date_str, time_str):
+    if not is_slot_bookable(date_str, time_str, db.rule("min_lead_minutes")):
         await callback.answer("Bu vaqt o'tib ketgan, boshqa soatni tanlang.", show_alert=True)
         await callback.message.edit_reply_markup(
             reply_markup=kb.slots(key, date_str, await db.booked_times(key, date_str))
@@ -84,13 +83,14 @@ async def take_slot(callback: CallbackQuery, callback_data: SlotCB, bot: Bot) ->
         )
         return
 
-    if await db.count_active_bookings(user_id) >= MAX_ACTIVE_BOOKINGS:
+    max_active = db.rule("max_active_bookings")
+    if await db.count_active_bookings(user_id) >= max_active:
         await callback.answer(
-            f"Sizda {MAX_ACTIVE_BOOKINGS} ta faol navbat bor. Avval birini bekor qiling.", show_alert=True
+            f"Sizda {max_active} ta faol navbat bor. Avval birini bekor qiling.", show_alert=True
         )
         return
 
-    service_name = dept_name(key)
+    service_name = db.dept_name(key)
     app_id = await db.create_booking(user_id, key, service_name, date_str, time_str)
 
     # app_id is None -> shu soniyada boshqa bemor ulgurdi (atomar indeks ushladi)

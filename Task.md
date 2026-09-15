@@ -220,10 +220,12 @@ Bemorga «ogohlantirish yuboriladi» deb va'da qilinadi, lekin bu hali ham **adm
 qo'lda tugma bosganda** ishlaydi. Rejada: `apscheduler` bilan qabuldan 1 kun va
 1 soat oldin avtomatik eslatma.
 
+### ✅ Ish soatlarini bot orqali o'zgartirish
+Bajarildi — pastdagi «⚙️ Hamma sozlamalar» bo'limiga qarang.
+
 ### ⚪ Ataylab qilinmadi
 - Ko'p tillilik (rus tili) — hozircha talab qilinmadi
 - Shifokor tanlash — bo'limlar darajasi yetarli deb topildi
-- Ish soatlarini bot orqali o'zgartirish — `config.py` dan tahrirlanadi
 
 ---
 
@@ -234,7 +236,7 @@ qo'lda tugma bosganda** ishlaydi. Rejada: `apscheduler` bilan qabuldan 1 kun va
 | ✅ | `README.md` | O'rnatish, sozlash, admin panel, loyiha tuzilishi |
 | ✅ | `.gitignore` | Maxfiy fayllar va shaxsiy ma'lumotlar bloklangan |
 | ✅ | `.env.example` | Barcha sozlamalar izohi bilan |
-| ✅ | **Testlar** | `tests.py` (154 ta) + `tests_e2e.py` (113 ta) = **267 ta test** |
+| ✅ | **Testlar** | `tests.py` (212 ta) + `tests_e2e.py` (153 ta) = **365 ta test** |
 | ✅ | `requirements.txt` | Faqat to'g'ridan-to'g'ri bog'liqliklar (19 → 3 ta) + `tzdata` |
 | ✅ | Lint | `ruff check --select F,E9` toza |
 | ✅ | `Dockerfile` | Railway va har qanday konteyner uchun tayyor |
@@ -344,11 +346,53 @@ ko'rsatiladi.
 
 ---
 
+## ⚙️ Hamma sozlamalar endi admindan o'zgartiriladi
+
+### Muammo
+Ish soatlari, bo'limlar, klinika manzili va navbat qoidalari `config.py` ichida
+**qotirib yozilgan** edi. Ularni o'zgartirish uchun kodni tahrirlash, commit qilish
+va botni qayta deploy qilish kerak bo'lardi. Klinika uchun bu real to'siq.
+
+### ✅ Yechim
+Barcha sozlamalar `data.json` ichiga ko'chirildi va super admin uchun
+**⚙️ Sozlamalar** bo'limi yaratildi ([handlers/settings.py](handlers/settings.py)).
+
+| Bo'lim | Nimani o'zgartirish mumkin |
+|---|---|
+| 🏥 Bo'limlar va soatlar | Bo'lim qo'shish · o'chirish · nomini o'zgartirish · ish soatlarini o'zgartirish · tartibini almashtirish |
+| 📅 Navbat qoidalari | Oldindan yozilish (kun) · bemorga navbat limiti · qabulgacha minimal vaqt · dam olish kunlari (bir bosishda) |
+| 📍 Klinika ma'lumotlari | Manzil matni · Google Maps havolasi |
+| ♻️ Standart holatga qaytarish | Sozlamalarni tiklaydi; bemorlar, navbatlar, adminlar va parol **tegilmaydi** |
+
+`config.py` dagi `DEFAULT_DEPARTMENTS` / `DEFAULT_RULES` / `DEFAULT_CLINIC` endi
+faqat **birinchi ishga tushish** uchun boshlang'ich qiymat. Keyin manba — `data.json`.
+
+### Amalga oshirishdagi muhim nuqtalar
+
+- **Darhol kuchga kiradi.** `keyboards.py` bo'limlarni va qoidalarni har safar
+  sozlamalardan o'qiydi — botni qayta ishga tushirish shart emas. E2E test buni
+  tekshiradi: admin nomni o'zgartirgach, bemor darhol yangi nomni ko'radi.
+- **Kiritilgan ma'lumot tekshiriladi.** Soatlar `09:00, 9:30 12:00` kabi erkin
+  formatda qabul qilinadi, `24:00` yoki `0900` rad etiladi. Sonlar `LIMITS`
+  chegarasidan chiqolmaydi. Havola `https://` bilan boshlanishi shart.
+- **Eski navbatlar buzilmaydi.** Bo'lim o'chirilsa ham, navbatdagi `service_name`
+  yozuvda saqlangani uchun tarix o'qiladi; `dept_name()` noma'lum kalit uchun ham
+  xavfsiz qiymat qaytaradi.
+- **Chegaralar qo'yilgan.** Oxirgi bo'limni o'chirib bo'lmaydi; hamma kunni dam
+  olish kuni qilib bo'lmaydi; bo'limlar soni 12 tadan oshmaydi.
+- **Yangi bo'lim kaliti qisqa** (`d1`, `d2`…) — `callback_data` 64 bayt limitiga
+  sig'ishi uchun. Test bilan qoplangan.
+- **Serverda tekshiriladi.** `settings`, `depts`, `rules`, `clinic` va barcha
+  tahrirlash callback'lari `_super()` bilan boshlanadi — tugma chizilmagan bo'lsa
+  ham qo'lda yuborib bo'lmaydi.
+
+---
+
 ## ✅ Tekshirish natijalari
 
 ```
-python tests.py       →  ✅ o'tdi: 154   ❌ yiqildi: 0
-python tests_e2e.py   →  ✅ o'tdi: 113   ❌ yiqildi: 0
+python tests.py       →  ✅ o'tdi: 212   ❌ yiqildi: 0
+python tests_e2e.py   →  ✅ o'tdi: 153   ❌ yiqildi: 0
 ruff check            →  All checks passed!
 Telegram ulanishi     →  OK  (@uzb123_kon_bot)
 ```

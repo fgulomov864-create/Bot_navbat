@@ -34,7 +34,13 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
-from config import DATA_PATH, DEFAULT_ADMIN_PASSWORD
+from config import (
+    DATA_PATH,
+    DEFAULT_ADMIN_PASSWORD,
+    DEFAULT_CLINIC,
+    DEFAULT_DEPARTMENTS,
+    DEFAULT_RULES,
+)
 from utils import now
 
 log = logging.getLogger(__name__)
@@ -65,6 +71,24 @@ def _empty_db() -> dict[str, Any]:
         "admins": {},
         "appointments": [],
         "next_id": 1,
+        "next_dept_id": 1,
+    }
+
+
+def _default_settings() -> dict[str, Any]:
+    """Panel orqali o'zgartiriladigan sozlamalarning boshlang'ich holati."""
+    return {
+        "departments": {
+            key: {"name": info["name"], "times": list(info["times"]), "order": i}
+            for i, (key, info) in enumerate(DEFAULT_DEPARTMENTS.items())
+        },
+        "rules": {
+            "booking_days_ahead": DEFAULT_RULES["booking_days_ahead"],
+            "max_active_bookings": DEFAULT_RULES["max_active_bookings"],
+            "min_lead_minutes": DEFAULT_RULES["min_lead_minutes"],
+            "weekend_days": list(DEFAULT_RULES["weekend_days"]),
+        },
+        "clinic": dict(DEFAULT_CLINIC),
     }
 
 
@@ -135,6 +159,7 @@ async def connect() -> None:
     _data["version"] = SCHEMA_VERSION
 
     _reindex()
+    await _seed_settings()
     await _seed_password()
 
     log.info(
@@ -157,10 +182,183 @@ async def get_setting(key: str) -> str | None:
     return _data["settings"].get(key)
 
 
-async def set_setting(key: str, value: str) -> None:
+async def set_setting(key: str, value) -> None:
     async with _lock:
         _data["settings"][key] = value
         await _persist()
+
+
+async def _seed_settings() -> None:
+    """Yetishmayotgan sozlamalarni boshlang'ich qiymatlar bilan to'ldiradi.
+
+    Faqat YO'Q bo'lganlari qo'shiladi — super admin panelda o'zgartirgan
+    qiymatlar hech qachon ustiga yozilmaydi.
+    """
+    settings = _data["settings"]
+    changed = False
+
+    for section, defaults in _default_settings().items():
+        if section not in settings:
+            settings[section] = defaults
+            changed = True
+        elif isinstance(defaults, dict) and section != "departments":
+            for field, value in defaults.items():
+                if field not in settings[section]:
+                    settings[section][field] = value
+                    changed = True
+
+    if "next_dept_id" not in _data:
+        _data["next_dept_id"] = 1
+        changed = True
+
+    if changed:
+        async with _lock:
+            await _persist()
+        log.info("Sozlamalar boshlang'ich qiymatlar bilan to'ldirildi")
+
+
+# --------------------------------------------------------------------------
+# Sozlamalarni O'QISH — sinxron, chunki hammasi xotirada turadi
+# --------------------------------------------------------------------------
+
+def departments() -> dict[str, dict]:
+    """Bo'limlar, admin belgilagan tartibda."""
+    items = _data["settings"].get("departments", {})
+    return dict(sorted(items.items(), key=lambda kv: (kv[1].get("order", 0), kv[0])))
+
+
+def department(key: str) -> dict | None:
+    return _data["settings"].get("departments", {}).get(key)
+
+
+def dept_name(key: str) -> str:
+    """Bo'lim kalitidan nomini qaytaradi.
+
+    O'chirilgan bo'lim uchun ham xavfsiz — eski navbatlar buzilmaydi.
+    """
+    info = department(key)
+    if info:
+        return info["name"]
+    first = next(iter(departments().values()), None)
+    return first["name"] if first else "🦷 Qabul"
+
+
+def dept_times(key: str) -> list[str]:
+    info = department(key)
+    return list(info["times"]) if info else []
+
+
+def rules() -> dict:
+    return _data["settings"].get("rules", {})
+
+
+def rule(name: str):
+    return rules().get(name, DEFAULT_RULES.get(name))
+
+
+def clinic() -> dict:
+    return _data["settings"].get("clinic", dict(DEFAULT_CLINIC))
+
+
+# --------------------------------------------------------------------------
+# Sozlamalarni O'ZGARTIRISH (admin paneli uchun)
+# --------------------------------------------------------------------------
+
+async def set_rule(name: str, value) -> None:
+    async with _lock:
+        _data["settings"].setdefault("rules", {})[name] = value
+        await _persist()
+    log.info("Sozlama o'zgartirildi: rules.%s = %r", name, value)
+
+
+async def set_clinic(field: str, value: str) -> None:
+    async with _lock:
+        _data["settings"].setdefault("clinic", {})[field] = value
+        await _persist()
+    log.info("Sozlama o'zgartirildi: clinic.%s", field)
+
+
+async def add_department(name: str, times: list[str]) -> str:
+    """Yangi bo'lim qo'shadi va uning kalitini qaytaradi.
+
+    Kalit qisqa ('d3') — callback_data 64 bayt limitiga sig'ishi uchun.
+    """
+    async with _lock:
+        depts = _data["settings"].setdefault("departments", {})
+
+        key = f"d{_data['next_dept_id']}"
+        while key in depts:  # nazariy to'qnashuv
+            _data["next_dept_id"] += 1
+            key = f"d{_data['next_dept_id']}"
+        _data["next_dept_id"] += 1
+
+        order = max((d.get("order", 0) for d in depts.values()), default=-1) + 1
+        depts[key] = {"name": name, "times": list(times), "order": order}
+        await _persist()
+
+    log.info("Yangi bo'lim qo'shildi: %s (%s)", key, name)
+    return key
+
+
+async def update_department(key: str, name: str | None = None, times: list[str] | None = None) -> bool:
+    async with _lock:
+        info = _data["settings"].get("departments", {}).get(key)
+        if not info:
+            return False
+        if name is not None:
+            info["name"] = name
+        if times is not None:
+            info["times"] = list(times)
+        await _persist()
+
+    log.info("Bo'lim yangilandi: %s", key)
+    return True
+
+
+async def update_department_order(key: str, order: int) -> bool:
+    async with _lock:
+        info = _data["settings"].get("departments", {}).get(key)
+        if not info:
+            return False
+        info["order"] = order
+        await _persist()
+        return True
+
+
+async def reset_settings() -> None:
+    """Sozlamalarni standart holatga qaytaradi.
+
+    Bemorlar, navbatlar, adminlar va PAROL tegilmaydi — faqat bo'limlar,
+    ish soatlari, navbat qoidalari va klinika ma'lumotlari tiklanadi.
+    """
+    async with _lock:
+        password = _data["settings"].get("admin_password")
+        _data["settings"] = _default_settings()
+        if password:
+            _data["settings"]["admin_password"] = password
+        await _persist()
+    log.warning("Sozlamalar standart holatga qaytarildi")
+
+
+async def delete_department(key: str) -> bool:
+    async with _lock:
+        depts = _data["settings"].get("departments", {})
+        if key not in depts or len(depts) <= 1:  # oxirgi bo'limni o'chirib bo'lmaydi
+            return False
+        del depts[key]
+        await _persist()
+
+    log.info("Bo'lim o'chirildi: %s", key)
+    return True
+
+
+def active_bookings_in_department(key: str) -> int:
+    """O'chirishdan oldin ogohlantirish uchun: bu bo'limda nechta faol navbat bor."""
+    today = now().strftime("%Y-%m-%d")
+    return sum(
+        1 for (dept, date, _time) in _by_slot
+        if dept == key and date >= today
+    )
 
 
 # --------------------------------------------------------------------------

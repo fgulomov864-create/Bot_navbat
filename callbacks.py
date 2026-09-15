@@ -56,3 +56,15 @@ class AdminQueueCB(CallbackData, prefix="admq", sep="|"):
     action: str  # notify | done | missed | cancel
     id: int
     page: int = 0
+
+
+class AdminDeptCB(CallbackData, prefix="admdept", sep="|"):
+    """Bo'limlarni tahrirlash (faqat super admin)."""
+    action: str  # open | rename | times | del_ask | del_yes | add | up | down
+    key: str = ""
+
+
+class AdminSetCB(CallbackData, prefix="admset", sep="|"):
+    """Navbat qoidalari va klinika ma'lumotlarini tahrirlash."""
+    action: str  # days | max | lead | weekday | address | maplink | reset_ask | reset_yes
+    value: int = -1

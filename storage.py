@@ -19,7 +19,7 @@ Ma'lumot butunligi
   almashtiriladi. Jarayon o'rtada uzilsa ham eski fayl butun qoladi.
 * Har safar saqlashdan oldin `data.json.bak` nusxasi yangilanadi.
 
-Eski SQLite bazasini ko'chirish uchun: python migrate_to_json.py
+Tashqi ma'lumotlar bazasi (SQLite, PostgreSQL) kerak emas — faqat standart kutubxona.
 """
 
 import asyncio

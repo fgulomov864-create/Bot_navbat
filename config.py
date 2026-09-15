@@ -36,12 +36,9 @@ except ValueError:
 
 TIMEZONE = ZoneInfo(os.getenv("TIMEZONE", "Asia/Tashkent"))
 
-# Ma'lumotlar JSON faylida saqlanadi (ilgari SQLite ishlatilgan).
+# Ma'lumotlar JSON faylida saqlanadi.
 # Yo'l absolyut — bot boshqa papkadan ishga tushirilsa ham o'sha bazani topadi.
 DATA_PATH = BASE_DIR / (os.getenv("DATA_FILE") or "data.json")
-
-# Eski SQLite bazasi — faqat migrate_to_json.py uchun kerak
-LEGACY_DB_PATH = BASE_DIR / (os.getenv("LEGACY_DB") or "dental_bot.db")
 MAP_LINK = os.getenv("MAP_LINK", "https://maps.app.goo.gl/Ay8YVsm44MMAWxst9?g_st=ac")
 CLINIC_ADDRESS = os.getenv("CLINIC_ADDRESS", "Stomatologiya klinikasi")
 

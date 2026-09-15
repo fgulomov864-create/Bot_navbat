@@ -10,7 +10,6 @@ Testlar vaqtinchalik papkada ishlaydi, haqiqiy data.json ga tegmaydi.
 import asyncio
 import json
 import os
-import sqlite3
 import sys
 import tempfile
 from pathlib import Path
@@ -388,61 +387,6 @@ async def test_keyboards() -> None:
           not any(b.text.startswith("❌") for row in viewer_plain.inline_keyboard for b in row))
 
 
-async def test_sqlite_migration() -> None:
-    print("\n📦 SQLite -> JSON migratsiyasi")
-
-    legacy = _TMP / "legacy.db"
-    legacy.unlink(missing_ok=True)
-    conn = sqlite3.connect(legacy)
-    cur = conn.cursor()
-    # ENG ESKI sxema: service_type ustuni ham yo'q
-    cur.execute("CREATE TABLE users (user_id INTEGER PRIMARY KEY, full_name TEXT, phone TEXT)")
-    cur.execute("""CREATE TABLE queue_appointments (
-        id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER,
-        booking_date TEXT, booking_time TEXT, status TEXT DEFAULT 'active',
-        UNIQUE (booking_date, booking_time))""")
-    cur.execute("INSERT INTO users VALUES (7437501484, \"Iqbol G'ulomov\", '+998916211929')")
-    cur.execute("INSERT INTO queue_appointments (id, user_id, booking_date, booking_time, status) "
-                "VALUES (1, 7437501484, '2026-09-12', '09:00', 'active')")
-    conn.commit()
-    conn.close()
-
-    from migrate_to_json import convert
-    out = _TMP / "converted.json"
-    data = convert(legacy, out)
-
-    check("bemor ko'chirildi", data["users"]["7437501484"]["phone"] == "+998916211929")
-    check("apostrofli ism buzilmadi", data["users"]["7437501484"]["full_name"] == "Iqbol G'ulomov")
-    check("navbat ko'chirildi", len(data["appointments"]) == 1)
-    check("service_key qo'shildi", data["appointments"][0]["service_key"] == "treatment")
-    check("service_name qo'shildi", data["appointments"][0]["service_name"] == TREAT)
-    check("next_id to'g'ri", data["next_id"] == 2)
-    check("JSON fayli yozildi", out.exists())
-
-    # O'rtadagi sxema: service_type bor
-    legacy2 = _TMP / "legacy2.db"
-    conn = sqlite3.connect(legacy2)
-    cur = conn.cursor()
-    cur.execute("CREATE TABLE users (user_id INTEGER PRIMARY KEY, full_name TEXT, phone TEXT)")
-    cur.execute("""CREATE TABLE queue_appointments (
-        id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, service_type TEXT,
-        booking_date TEXT, booking_time TEXT, status TEXT DEFAULT 'active')""")
-    cur.execute("INSERT INTO queue_appointments (id, user_id, service_type, booking_date, booking_time, status) "
-                "VALUES (5, 1, '👨‍⚕️ Maslahat olish', '2026-10-01', '11:00', 'active')")
-    conn.commit()
-    conn.close()
-
-    data2 = convert(legacy2, _TMP / "converted2.json")
-    check("service_type -> consultation kaliti", data2["appointments"][0]["service_key"] == "consultation")
-    check("next_id eng katta id dan keyin", data2["next_id"] == 6)
-
-    # Ko'chirilgan faylni storage o'qiy oladimi?
-    config.DATA_PATH.write_text(out.read_text(encoding="utf-8"), encoding="utf-8")
-    await db.connect()
-    check("storage ko'chirilgan faylni o'qidi", await db.count_users() == 1)
-    check("indeks qurildi", await db.booked_times("treatment", "2026-09-12") == {"09:00"})
-
-
 # --------------------------------------------------------------------------
 
 async def main() -> None:
@@ -455,7 +399,7 @@ async def main() -> None:
         test_utils, test_callbacks, test_password, test_admins,
         test_users_and_booking, test_ownership, test_race_condition,
         test_persistence, test_corrupted_file, test_purge, test_stats,
-        test_keyboards, test_sqlite_migration,
+        test_keyboards,
     ):
         await test()
 

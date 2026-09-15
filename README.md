@@ -3,7 +3,8 @@
 Telegram bot: bemorlar bo'lim, kun va soatni tanlab onlayn navbat oladi;
 shifokor/administrator esa parol bilan himoyalangan panel orqali navbatlarni boshqaradi.
 
-**Texnologiyalar:** Python 3.11+ · [aiogram 3](https://docs.aiogram.dev) · JSON saqlash (tashqi baza kerak emas)
+**Texnologiyalar:** Python 3.11+ · [aiogram 3](https://docs.aiogram.dev) · JSON saqlash
+(tashqi ma'lumotlar bazasi kerak emas — SQLite ham, PostgreSQL ham)
 
 ---
 
@@ -76,26 +77,12 @@ python main.py
 
 ---
 
-## Eski SQLite bazasidan ko'chirish
-
-Loyiha avval SQLite (`dental_bot.db`) ishlatgan. Ma'lumotlarni ko'chirish uchun:
-
-```bash
-python migrate_to_json.py                  # dental_bot.db -> data.json
-python migrate_to_json.py eski.db yangi.json
-```
-
-Skript eski `.db` faylga tegmaydi (faqat o'qiydi) va uchala eski sxemani ham tushunadi.
-
----
-
 ## Loyiha tuzilishi
 
 ```
 main.py              Kirish nuqtasi: logging, Bot/Dispatcher, startup/shutdown
 config.py            .env o'qish, konstantalar, bo'limlar va ish soatlari
-storage.py           JSON ma'lumotlar qatlami (indekslar, atomar yozish, parol hash)
-migrate_to_json.py   SQLite -> JSON konvertori
+storage.py           Ma'lumotlar qatlami: JSON + indekslar, atomar yozish, parol hash
 utils.py             Vaqt zonasi, sana formatlash, HTML escaping
 keyboards.py         Barcha klaviaturalar
 callbacks.py         Tipli callback_data fabrikalari
@@ -106,7 +93,7 @@ handlers/
   admin.py           Admin panel: parol, navbatlar, adminlar
   fallback.py        Tushunilmagan xabarlar
   errors.py          Global xato ushlagich
-tests.py             Biznes-mantiq testlari (134 ta)
+tests.py             Biznes-mantiq testlari (123 ta)
 tests_e2e.py         Uchidan-uchiga testlar (97 ta)
 ```
 
@@ -139,7 +126,7 @@ Yozishda:
 ## Testlar
 
 ```bash
-python tests.py        # biznes-mantiq: 134 ta test
+python tests.py        # biznes-mantiq: 123 ta test
 python tests_e2e.py    # handlerlar: 97 ta test
 ```
 
@@ -148,8 +135,7 @@ almashtirilgan, u yuborilgan xabarlarni ro'yxatga yig'adi.
 
 Testlar quyidagilarni tekshiradi: ro'yxatdan o'tish, navbat olish, bandlik,
 egalik tekshiruvi, admin parol oqimi, brute-force bloki, adminlarni boshqarish,
-50 ta bir vaqtdagi bron urinishi, fayl buzilgandan keyin tiklanish,
-SQLite→JSON migratsiyasi.
+50 ta bir vaqtdagi bron urinishi, fayl buzilgandan keyin tiklanish.
 
 ---
 

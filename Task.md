@@ -14,7 +14,8 @@ kamchiliklar ro'yxati va ularning hozirgi holati.
 
 **Bajarildi:**
 - `.gitignore` yaratildi: `*.db`, `data.json`, `.env`, `.venv/`, `.idea/`, `__pycache__/`, `*.log`.
-- `git rm --cached dental_bot.db` — fayl kuzatuvdan chiqarildi (lokal nusxa joyida qoldi).
+- `git rm --cached dental_bot.db`, so'ngra ma'lumot JSON'ga ko'chirilib tekshirilgach,
+  fayl butunlay o'chirildi.
 
 > ⚠️ **Hali qilinishi kerak:** fayl **eski commitlarda** saqlanib qolgan.
 > To'liq o'chirish uchun git tarixini qayta yozish kerak:
@@ -233,7 +234,7 @@ qo'lda tugma bosganda** ishlaydi. Rejada: `apscheduler` bilan qabuldan 1 kun va
 | ✅ | `README.md` | O'rnatish, sozlash, admin panel, loyiha tuzilishi |
 | ✅ | `.gitignore` | Maxfiy fayllar va shaxsiy ma'lumotlar bloklangan |
 | ✅ | `.env.example` | Barcha sozlamalar izohi bilan |
-| ✅ | **Testlar** | `tests.py` (134 ta) + `tests_e2e.py` (97 ta) = **231 ta test** |
+| ✅ | **Testlar** | `tests.py` (123 ta) + `tests_e2e.py` (97 ta) = **220 ta test** |
 | ✅ | `requirements.txt` | Faqat to'g'ridan-to'g'ri bog'liqliklar (19 → 3 ta) + `tzdata` |
 | ✅ | Lint | `ruff check --select F,E9` toza |
 | 🔜 | `Dockerfile` | Deploy hozircha qo'lda |
@@ -241,20 +242,25 @@ qo'lda tugma bosganda** ishlaydi. Rejada: `apscheduler` bilan qabuldan 1 kun va
 
 ---
 
-## 📦 SQLite → JSON o'tkazish
+## 📦 SQLite butunlay olib tashlandi
 
-Loyiha SQLite'dan JSON saqlashga o'tkazildi.
+Loyiha SQLite'dan JSON saqlashga **to'liq** o'tkazildi. Endi loyihada birorta joyda
+SQL yo'q — na kod, na bog'liqlik, na fayl.
 
 **Bajarildi:**
 - [storage.py](storage.py) — JSON qatlami: xotirada 3 ta indeks
   (`id → navbat`, `user_id → navbatlar`, `(bo'lim, kun, soat) → navbat`),
   `asyncio.Lock` bilan seriyalash, **atomar yozish** (`.tmp` + `os.replace` + `fsync`),
   har saqlashda `.bak` zaxira, buzilgan fayldan **avtomatik tiklanish**.
-- [migrate_to_json.py](migrate_to_json.py) — konvertor. Uchala eski sxemani tushunadi
-  (`service_type` siz / bilan / yangi), eski `.db` faylga tegmaydi.
-- `aiosqlite` bog'liqligi olib tashlandi (konvertor standart `sqlite3` dan foydalanadi).
+- Haqiqiy baza ko'chirildi va **yozma-yozma solishtirib tekshirildi**
+  (1 bemor + 1 navbat → `data.json`), keyin `dental_bot.db` o'chirildi.
+- `aiosqlite` bog'liqligi olib tashlandi (`requirements.txt`: 19 → 3 ta paket).
+- Ko'chirish tugagach `migrate_to_json.py` konvertori ham o'chirildi.
+  Kerak bo'lsa, git tarixidagi `20d17f5` commit'dan olish mumkin.
+- `.env.example` dagi eski `DB_NAME=dental_bot.db` → `DATA_FILE=data.json`.
 
-**Haqiqiy baza ko'chirildi:** 1 bemor + 1 navbat → `data.json` (590 bayt), tekshirildi.
+**O'chirilgan keraksiz fayllar:** `dental_bot.db`, `migrate_to_json.py`,
+`__pycache__/`, `.ruff_cache/`, `bot.log`, test qoldiqlari (`_smoke.db*`).
 
 > ⚠️ **Diqqat:** JSON saqlash **bitta bot nusxasiga** mo'ljallangan. Bir nechta
 > jarayonda (horizontal scaling) ishlatilsa, fayl ustida to'qnashuv bo'ladi —
@@ -265,7 +271,7 @@ Loyiha SQLite'dan JSON saqlashga o'tkazildi.
 ## ✅ Tekshirish natijalari
 
 ```
-python tests.py       →  ✅ o'tdi: 134   ❌ yiqildi: 0
+python tests.py       →  ✅ o'tdi: 123   ❌ yiqildi: 0
 python tests_e2e.py   →  ✅ o'tdi:  97   ❌ yiqildi: 0
 ruff check            →  All checks passed!
 Telegram ulanishi     →  OK  (@uzb123_kon_bot)
@@ -274,7 +280,7 @@ Telegram ulanishi     →  OK  (@uzb123_kon_bot)
 Testlar quyidagilarni qoplaydi: telefon validatsiyasi, vaqt zonasi, HTML escaping,
 callback round-trip (64 bayt limiti), parol hash, adminlar iyerarxiyasi, bandlik,
 **egalik tekshiruvi**, 50 ta bir vaqtdagi bron urinishi, diskka saqlash/tiklash,
-buzilgan fayldan tiklanish, brute-force bloki, SQLite→JSON migratsiyasi.
+buzilgan fayldan tiklanish, brute-force bloki.
 
 ---
 
@@ -286,4 +292,3 @@ buzilgan fayldan tiklanish, brute-force bloki, SQLite→JSON migratsiyasi.
    o'zgartiring (🔑 tugmasi).
 3. **`.env` ni to'ldiring** — `BOT_TOKEN` majburiy; `ADMIN_ID` ni ko'rsatsangiz,
    parolsiz ham super admin bo'lasiz.
-4. Bot ishlayotganiga ishonch hosil qilgach, `dental_bot.db` ni qo'lda o'chiring.

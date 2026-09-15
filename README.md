@@ -115,6 +115,9 @@ ADMIN_ID=637554472,123456789       # xuddi shunday
 
 ## 🚂 Railway'ga joylash
 
+> 📄 Qadamma-qadam qo'llanma: **[DEPLOY.md](DEPLOY.md)**
+> Tekshirish: `python check.py`
+
 ⚠️ **Eng muhim narsa:** Railway konteynerining diski **vaqtinchalik**. Hech narsa
 qilinmasa, har bir redeploy'da `data.json` — ya'ni **barcha bemorlar va navbatlar** —
 o'chib ketadi. Quyidagi ikki himoyani ishlatish kerak.
@@ -213,6 +216,7 @@ config.py            .env o'qish, konstantalar, bo'limlar va ish soatlari
 storage.py           Ma'lumotlar qatlami: JSON + indekslar, atomar yozish, parol hash
 backup.py            GitHub'ga zaxiralash, shifrlash, tiklash
 reminders.py         🔔 Avtomatik eslatmalar (kun oldin / soat oldin)
+check.py             Deploy oldidan tekshiruv (nima tayyor, nima yetishmayapti)
 utils.py             Vaqt zonasi, sana formatlash, HTML escaping
 keyboards.py         Barcha klaviaturalar
 callbacks.py         Tipli callback_data fabrikalari

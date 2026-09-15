@@ -1,0 +1,50 @@
+name: Testlar
+
+# Har push va pull request'da testlar avtomatik ishga tushadi.
+# 'backup' shoxi chiqarib tashlangan — u yerga faqat zaxira fayli yoziladi,
+# kod yo'q, shuning uchun test qilishning hojati ham yo'q.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Python o'rnatish
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Bog'liqliklarni o'rnatish
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install ruff
+
+      - name: Lint (ruff)
+        run: ruff check --select F,E9 .
+
+      - name: Biznes-mantiq testlari
+        run: python tests.py
+
+      - name: Uchidan-uchiga testlar
+        run: python tests_e2e.py
+
+      - name: Maxfiy fayllar commit qilinmaganini tekshirish
+        run: |
+          set -e
+          for f in .env data.json dental_bot.db bot.log; do
+            if git ls-files --error-unmatch "$f" >/dev/null 2>&1; then
+              echo "::error::$f git'ga qo'shilgan — bu maxfiy ma'lumot!"
+              exit 1
+            fi
+          done
+          echo "Maxfiy fayllar git'da yo'q."

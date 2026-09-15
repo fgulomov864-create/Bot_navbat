@@ -228,6 +228,7 @@ tests.py             Biznes-mantiq testlari (255 ta)
 tests_e2e.py         Uchidan-uchiga testlar (153 ta)
 Dockerfile           Railway / har qanday konteyner uchun
 railway.json         Railway build va deploy sozlamalari
+.github/workflows/   CI: har push'da lint + testlar
 ```
 
 ### Ma'lumotlar saqlanishi

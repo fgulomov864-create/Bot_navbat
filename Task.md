@@ -251,7 +251,7 @@ Bajarildi — pastdagi «⚙️ Hamma sozlamalar» bo'limiga qarang.
 | ✅ | `requirements.txt` | Faqat to'g'ridan-to'g'ri bog'liqliklar (19 → 3 ta) + `tzdata` |
 | ✅ | Lint | `ruff check --select F,E9` toza |
 | ✅ | `Dockerfile` | Railway va har qanday konteyner uchun tayyor |
-| 🔜 | CI (GitHub Actions) | Testlarni avtomatik ishga tushirish — yagona qolgan band |
+| ✅ | CI (GitHub Actions) | Har push'da lint + 408 test + maxfiy fayl tekshiruvi |
 
 ---
 
@@ -473,7 +473,7 @@ Ro'yxatdagi har bir da'vo haqiqiy kodga solishtirib tekshirildi
 | 🟠 2-daraja (xatolar) | 13 / 13 ✅ |
 | 🟡 3-daraja (arxitektura) | 9 / 9 ✅ |
 | 🟢 4-daraja (funksiyalar) | 5 / 5 ✅ *(4.1 shu bosqichda yakunlandi)* |
-| 🔵 5-daraja (infratuzilma) | 7 / 8 — faqat **CI** qolgan |
+| 🔵 5-daraja (infratuzilma) | 8 / 8 ✅ |
 
 Tekshiruv paytida yana ikkita narsa tuzatildi:
 - `config.py` va `tests.py` izohlarida haqiqiy Telegram ID (`637554472`) namuna
